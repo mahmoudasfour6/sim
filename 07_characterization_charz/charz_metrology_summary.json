@@ -1,0 +1,14 @@
+{
+  "env": "charz",
+  "abtem_version": "1.0.11",
+  "py4dstem_version": "0.14.14",
+  "hyperspy_version": "2.5.0",
+  "xrayutilities_version": "1.8.0",
+  "sige_eps_xx_pct": -0.8243995979273904,
+  "sige_eps_zz_pct": 0.6326356953624304,
+  "py4dstem_tetragonal_rel_si_pct": 1.4691469347125619,
+  "abtem_si_sige_contrast_ratio": 1.0007424913430198,
+  "hrxrd_sige_004_peak_arcsec": -2023.3592880978865,
+  "hrxrd_algaas_004_peak_arcsec": -150.8342602892103,
+  "dashboard_png": "/home/mahmoudasfour/sim_workspace/07_characterization_charz/charz_metrology_dashboard.png"
+}

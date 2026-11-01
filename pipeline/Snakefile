@@ -1,0 +1,53 @@
+# Snakemake Declarative DAG for Heavy Multi-Environment Semiconductor & Radiation Workflows
+# Run with:
+#   /home/mahmoudasfour/miniforge3/envs/workflow/bin/snakemake --cores 14 -s /home/mahmoudasfour/sim_workspace/pipeline/Snakefile
+
+WORKSPACE = "/home/mahmoudasfour/sim_workspace"
+ENVS = "/home/mahmoudasfour/miniforge3/envs"
+
+rule all:
+    input:
+        f"{WORKSPACE}/pipeline/w1_materials_out.json",
+        f"{WORKSPACE}/pipeline/w5_tcad_out.json",
+        f"{WORKSPACE}/pipeline/multiscale_results.json",
+        f"{WORKSPACE}/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.json",
+        f"{WORKSPACE}/07_characterization_charz/charz_metrology_summary.json",
+
+rule ihp_npn13g2_baseline:
+    input:
+        script=f"{WORKSPACE}/benchmarks/ihp_npn13g2_baseline/run_npn13g2_baseline.py"
+    output:
+        json=f"{WORKSPACE}/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.json",
+        png=f"{WORKSPACE}/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.png"
+    threads: 4
+    shell:
+        "OMP_NUM_THREADS={threads} {ENVS}/eda/bin/python {input.script}"
+
+rule charz_metrology:
+    input:
+        script=f"{WORKSPACE}/07_characterization_charz/test_charz_stem_hrxrd.py"
+    output:
+        json=f"{WORKSPACE}/07_characterization_charz/charz_metrology_summary.json",
+        png=f"{WORKSPACE}/07_characterization_charz/charz_metrology_dashboard.png"
+    threads: 6
+    shell:
+        "OMP_NUM_THREADS={threads} {ENVS}/charz/bin/python {input.script}"
+
+rule multiscale_pipeline:
+    input:
+        script=f"{WORKSPACE}/pipeline/run_multiscale_pipeline.py"
+    output:
+        json=f"{WORKSPACE}/pipeline/multiscale_results.json"
+    threads: 4
+    shell:
+        "OMP_NUM_THREADS={threads} {ENVS}/tcad/bin/python {input.script}"
+
+rule all_6_workspaces:
+    input:
+        script=f"{WORKSPACE}/pipeline/run_all_6_workspaces_pipeline.py"
+    output:
+        w1=f"{WORKSPACE}/pipeline/w1_materials_out.json",
+        w5=f"{WORKSPACE}/pipeline/w5_tcad_out.json"
+    threads: 6
+    shell:
+        "OMP_NUM_THREADS={threads} {ENVS}/tcad/bin/python {input.script}"

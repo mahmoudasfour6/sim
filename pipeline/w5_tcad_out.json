@@ -3,6 +3,6 @@
   "conda_env": "tcad",
   "devsim_version": "2.11.0",
   "peak_strike_current_mA": 2.767645709035832,
-  "sram_v_min_V": -2.07556,
+  "sram_v_min_V": -0.756404,
   "seu_bit_flipped": true
 }

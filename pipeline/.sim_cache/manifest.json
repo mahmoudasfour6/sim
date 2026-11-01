@@ -1,0 +1,39 @@
+{
+  "w3_quantum_subband": {
+    "signature": "b88709126b259cfba47238a17b93873d5509ecd5c310b04d249a1a6d7b23196f",
+    "wall_time_s": 0.312,
+    "outputs": [
+      "/home/mahmoudasfour/sim_workspace/pipeline/w3_quantum_out.json"
+    ]
+  },
+  "w1_materials_sic_si": {
+    "signature": "ad591419849d33872f40c6177a683748461ca3a97bc0fc456087405cf03da2c4",
+    "wall_time_s": 1.396,
+    "outputs": [
+      "/home/mahmoudasfour/sim_workspace/pipeline/w1_materials_out.json"
+    ]
+  },
+  "ihp_npn13g2_foundry_baseline": {
+    "signature": "54ed030e6446bc2c3e491db27668ea0bd464e4c0c14a0eb182aab7ebcba1ffd6",
+    "wall_time_s": 1.761,
+    "outputs": [
+      "/home/mahmoudasfour/sim_workspace/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.json",
+      "/home/mahmoudasfour/sim_workspace/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.png"
+    ]
+  },
+  "charz_stem_hrxrd_metrology": {
+    "signature": "49ba09393df3a80d7b6523223eddea7e0d84a94b7b629b1602bf6629f9c213f9",
+    "wall_time_s": 8.02,
+    "outputs": [
+      "/home/mahmoudasfour/sim_workspace/07_characterization_charz/charz_metrology_summary.json",
+      "/home/mahmoudasfour/sim_workspace/07_characterization_charz/charz_metrology_dashboard.png"
+    ]
+  },
+  "multiscale_coupled_pipeline": {
+    "signature": "4cef11645e2a34989597b3845d47a476f1793441a2df7dcfae5dee252467425a",
+    "wall_time_s": 1.093,
+    "outputs": [
+      "/home/mahmoudasfour/sim_workspace/pipeline/multiscale_results.json"
+    ]
+  }
+}

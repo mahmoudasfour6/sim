@@ -1,0 +1,205 @@
+* IHP SG13G2 npn13G2 baseline (hbt_wcs, 27.0 C)
+.lib /home/mahmoudasfour/sim_workspace/ihp_sg13g2_pdk/ihp-sg13g2/libs.tech/ngspice/models/cornerHBT.lib hbt_wcs
+.param temp=27.0
+.option temp=27.0 tnom=27 gmin=1e-15 abstol=1e-16 reltol=1e-5
+
+VC c 0 DC 1.5
+VB b_dc 0 DC 0.8
+Lbias b_dc b 1m
+IB 0 b DC 0 AC 1.0
+X1 c b 0 0 npn13G2 Nx=1
+.control
+alter VB dc=0.7200
+op
+let icdc_0 = -i(VC)
+print icdc_0
+ac lin 1 20000000000.0 20000000000.0
+let h21_0 = mag(i(VC))
+print h21_0
+
+alter VB dc=0.7300
+op
+let icdc_1 = -i(VC)
+print icdc_1
+ac lin 1 20000000000.0 20000000000.0
+let h21_1 = mag(i(VC))
+print h21_1
+
+alter VB dc=0.7400
+op
+let icdc_2 = -i(VC)
+print icdc_2
+ac lin 1 20000000000.0 20000000000.0
+let h21_2 = mag(i(VC))
+print h21_2
+
+alter VB dc=0.7500
+op
+let icdc_3 = -i(VC)
+print icdc_3
+ac lin 1 20000000000.0 20000000000.0
+let h21_3 = mag(i(VC))
+print h21_3
+
+alter VB dc=0.7600
+op
+let icdc_4 = -i(VC)
+print icdc_4
+ac lin 1 20000000000.0 20000000000.0
+let h21_4 = mag(i(VC))
+print h21_4
+
+alter VB dc=0.7700
+op
+let icdc_5 = -i(VC)
+print icdc_5
+ac lin 1 20000000000.0 20000000000.0
+let h21_5 = mag(i(VC))
+print h21_5
+
+alter VB dc=0.7800
+op
+let icdc_6 = -i(VC)
+print icdc_6
+ac lin 1 20000000000.0 20000000000.0
+let h21_6 = mag(i(VC))
+print h21_6
+
+alter VB dc=0.7900
+op
+let icdc_7 = -i(VC)
+print icdc_7
+ac lin 1 20000000000.0 20000000000.0
+let h21_7 = mag(i(VC))
+print h21_7
+
+alter VB dc=0.8000
+op
+let icdc_8 = -i(VC)
+print icdc_8
+ac lin 1 20000000000.0 20000000000.0
+let h21_8 = mag(i(VC))
+print h21_8
+
+alter VB dc=0.8100
+op
+let icdc_9 = -i(VC)
+print icdc_9
+ac lin 1 20000000000.0 20000000000.0
+let h21_9 = mag(i(VC))
+print h21_9
+
+alter VB dc=0.8200
+op
+let icdc_10 = -i(VC)
+print icdc_10
+ac lin 1 20000000000.0 20000000000.0
+let h21_10 = mag(i(VC))
+print h21_10
+
+alter VB dc=0.8300
+op
+let icdc_11 = -i(VC)
+print icdc_11
+ac lin 1 20000000000.0 20000000000.0
+let h21_11 = mag(i(VC))
+print h21_11
+
+alter VB dc=0.8400
+op
+let icdc_12 = -i(VC)
+print icdc_12
+ac lin 1 20000000000.0 20000000000.0
+let h21_12 = mag(i(VC))
+print h21_12
+
+alter VB dc=0.8500
+op
+let icdc_13 = -i(VC)
+print icdc_13
+ac lin 1 20000000000.0 20000000000.0
+let h21_13 = mag(i(VC))
+print h21_13
+
+alter VB dc=0.8600
+op
+let icdc_14 = -i(VC)
+print icdc_14
+ac lin 1 20000000000.0 20000000000.0
+let h21_14 = mag(i(VC))
+print h21_14
+
+alter VB dc=0.8700
+op
+let icdc_15 = -i(VC)
+print icdc_15
+ac lin 1 20000000000.0 20000000000.0
+let h21_15 = mag(i(VC))
+print h21_15
+
+alter VB dc=0.8800
+op
+let icdc_16 = -i(VC)
+print icdc_16
+ac lin 1 20000000000.0 20000000000.0
+let h21_16 = mag(i(VC))
+print h21_16
+
+alter VB dc=0.8900
+op
+let icdc_17 = -i(VC)
+print icdc_17
+ac lin 1 20000000000.0 20000000000.0
+let h21_17 = mag(i(VC))
+print h21_17
+
+alter VB dc=0.9000
+op
+let icdc_18 = -i(VC)
+print icdc_18
+ac lin 1 20000000000.0 20000000000.0
+let h21_18 = mag(i(VC))
+print h21_18
+
+alter VB dc=0.9100
+op
+let icdc_19 = -i(VC)
+print icdc_19
+ac lin 1 20000000000.0 20000000000.0
+let h21_19 = mag(i(VC))
+print h21_19
+
+alter VB dc=0.9200
+op
+let icdc_20 = -i(VC)
+print icdc_20
+ac lin 1 20000000000.0 20000000000.0
+let h21_20 = mag(i(VC))
+print h21_20
+
+alter VB dc=0.9300
+op
+let icdc_21 = -i(VC)
+print icdc_21
+ac lin 1 20000000000.0 20000000000.0
+let h21_21 = mag(i(VC))
+print h21_21
+
+alter VB dc=0.9400
+op
+let icdc_22 = -i(VC)
+print icdc_22
+ac lin 1 20000000000.0 20000000000.0
+let h21_22 = mag(i(VC))
+print h21_22
+
+alter VB dc=0.9500
+op
+let icdc_23 = -i(VC)
+print icdc_23
+ac lin 1 20000000000.0 20000000000.0
+let h21_23 = mag(i(VC))
+print h21_23
+
+.endc
+.end

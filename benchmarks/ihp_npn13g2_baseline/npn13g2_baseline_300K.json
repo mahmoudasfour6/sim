@@ -1,0 +1,29 @@
+{
+  "device": "npn13G2",
+  "Nx": 1,
+  "VCE_ft_V": 1.5,
+  "f_h21_Hz": 20000000000.0,
+  "corners": {
+    "hbt_typ": {
+      "beta_peak": 800.1696215785489,
+      "IC_at_beta_peak_A": 9.92159584e-05,
+      "VBE_at_IC_1uA_V": 0.665,
+      "fT_peak_GHz": 471.06140000000005,
+      "IC_at_fT_peak_A": 0.003112787
+    },
+    "hbt_bcs": {
+      "beta_peak": 1487.7508185606748,
+      "IC_at_beta_peak_A": 0.000105991117,
+      "VBE_at_IC_1uA_V": 0.66,
+      "fT_peak_GHz": 657.6792,
+      "IC_at_fT_peak_A": 0.00456477
+    },
+    "hbt_wcs": {
+      "beta_peak": 451.0359553488643,
+      "IC_at_beta_peak_A": 0.000103346043,
+      "VBE_at_IC_1uA_V": 0.675,
+      "fT_peak_GHz": 357.7236,
+      "IC_at_fT_peak_A": 0.00228715
+    }
+  }
+}

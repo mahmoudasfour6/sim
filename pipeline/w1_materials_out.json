@@ -3,7 +3,7 @@
   "conda_env": "materials",
   "si_lattice_A": 5.431,
   "si_volume_A3": 160.191477991,
-  "sic_density_g_cm3": 0.8035490313876967,
+  "sic_density_g_cm3": 3.214196125550787,
   "qe_si_scf_energy_Ry": -22.83876677,
   "lammps_pka_energy_eV": 200.0,
   "md_vacancy_trap_scale_cm3": 1.2e+17,

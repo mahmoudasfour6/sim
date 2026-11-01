@@ -39,7 +39,7 @@ import pymatgen.core as mg
 
 si = bulk("Si", "diamond", a=5.431, cubic=True)
 lat = mg.Lattice.cubic(4.3596)
-sic = mg.Structure(lat, ["Si", "C"], [[0, 0, 0], [0.25, 0.25, 0.25]])
+sic = mg.Structure.from_spacegroup("F-43m", lat, ["Si", "C"], [[0, 0, 0], [0.25, 0.25, 0.25]])
 
 out = {{
     "workspace": "01_materials_dft_md",
@@ -260,6 +260,8 @@ with open(cir_path, "w") as f:
 Vdd vdd 0 DC 1.8
 Rpull vdd q_node 2200
 Cnode q_node 0 25f
+Dsub 0 q_node DSUB
+.model DSUB D(IS=2e-15 N=1.05 RS=12 CJO=4f)
 Irad q_node 0 PWL({{pwl_str}})
 .ic V(q_node)=1.8
 .tran 5p 3n uic

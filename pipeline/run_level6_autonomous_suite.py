@@ -216,6 +216,8 @@ Vdd vdd 0 DC 1.8
 * PMOS pull-up restoring load (effective R_pullup = 2.2 kOhm) + storage node capacitance (C_node = 25 fF)
 Rpull vdd q_node 2200
 Cnode q_node 0 25f
+Dsub 0 q_node DSUB
+.model DSUB D(IS=2e-15 N=1.05 RS=12 CJO=4f)
 * Coupled TCAD Heavy-Ion + Avalanche Transient Photocurrent Source
 Irad q_node 0 PWL({{pwl_pairs}})
 .ic V(q_node)=1.8

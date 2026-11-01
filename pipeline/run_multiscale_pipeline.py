@@ -10,7 +10,6 @@ Chains 4 distinct Conda environments via shared data files:
 import os
 import json
 import subprocess
-import numpy as np
 
 HOME = "/home/mahmoudasfour"
 MAMBA = f"{HOME}/miniforge3/bin/mamba"
@@ -69,8 +68,12 @@ I_rec_post = Area * (q * ni * W_dep / (2.0 * tau_post)) * math.exp(V_bias / (2.0
 P_diss_post_W = (I_diff + I_rec_post) * V_bias
 print(json.dumps({{
     'devsim_version': devsim.__version__,
+    'I_recomb_pre_A': I_rec_pre,
+    'I_recomb_post_A': I_rec_post,
     'I_total_pre_A': I_diff + I_rec_pre,
     'I_total_post_A': I_diff + I_rec_post,
+    'recomb_leakage_increase_factor': I_rec_post / I_rec_pre,
+    'total_current_increase_ratio': (I_diff + I_rec_post) / (I_diff + I_rec_pre),
     'leakage_increase_factor': I_rec_post / I_rec_pre,
     'power_dissipation_W': P_diss_post_W
 }}))

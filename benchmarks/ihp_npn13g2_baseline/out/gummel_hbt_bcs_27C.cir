@@ -1,0 +1,17 @@
+* IHP SG13G2 npn13G2 baseline (hbt_bcs, 27.0 C)
+.lib /home/mahmoudasfour/sim_workspace/ihp_sg13g2_pdk/ihp-sg13g2/libs.tech/ngspice/models/cornerHBT.lib hbt_bcs
+.param temp=27.0
+.option temp=27.0 tnom=27 gmin=1e-15 abstol=1e-16 reltol=1e-5
+
+VC c 0 DC 0
+VB b 0 DC 0
+VE e 0 DC -0.6
+X1 c b e 0 npn13G2 Nx=1
+.control
+dc VE -0.35 -1.02 -0.005
+let vbe = -v(e)
+let ic = -i(VC)
+let ib = -i(VB)
+wrdata gummel_hbt_bcs_27C.dat vbe ic ib
+.endc
+.end

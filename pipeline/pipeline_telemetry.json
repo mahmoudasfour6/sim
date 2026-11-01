@@ -1,0 +1,78 @@
+{
+  "total_cores_budget": 14,
+  "num_stages": 5,
+  "num_waves": 2,
+  "waves": [
+    {
+      "wave_index": 1,
+      "wall_time_s": 0.002,
+      "stages": [
+        {
+          "stage": "charz_stem_hrxrd_metrology",
+          "env": "charz",
+          "status": "CACHED",
+          "threads": 6,
+          "wall_time_s": 0.0,
+          "signature": "49ba09393df3",
+          "outputs": [
+            "/home/mahmoudasfour/sim_workspace/07_characterization_charz/charz_metrology_summary.json",
+            "/home/mahmoudasfour/sim_workspace/07_characterization_charz/charz_metrology_dashboard.png"
+          ]
+        },
+        {
+          "stage": "ihp_npn13g2_foundry_baseline",
+          "env": "eda",
+          "status": "CACHED",
+          "threads": 4,
+          "wall_time_s": 0.0,
+          "signature": "54ed030e6446",
+          "outputs": [
+            "/home/mahmoudasfour/sim_workspace/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.json",
+            "/home/mahmoudasfour/sim_workspace/benchmarks/ihp_npn13g2_baseline/npn13g2_baseline_300K.png"
+          ]
+        },
+        {
+          "stage": "w1_materials_sic_si",
+          "env": "materials",
+          "status": "CACHED",
+          "threads": 2,
+          "wall_time_s": 0.0,
+          "signature": "ad591419849d",
+          "outputs": [
+            "/home/mahmoudasfour/sim_workspace/pipeline/w1_materials_out.json"
+          ]
+        },
+        {
+          "stage": "w3_quantum_subband",
+          "env": "quantum_iii_v",
+          "status": "CACHED",
+          "threads": 2,
+          "wall_time_s": 0.0,
+          "signature": "b88709126b25",
+          "outputs": [
+            "/home/mahmoudasfour/sim_workspace/pipeline/w3_quantum_out.json"
+          ]
+        }
+      ]
+    },
+    {
+      "wave_index": 2,
+      "wall_time_s": 0.001,
+      "stages": [
+        {
+          "stage": "multiscale_coupled_pipeline",
+          "env": "tcad",
+          "status": "CACHED",
+          "threads": 14,
+          "wall_time_s": 0.0,
+          "signature": "4cef11645e2a",
+          "outputs": [
+            "/home/mahmoudasfour/sim_workspace/pipeline/multiscale_results.json"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_wall_time_s": 0.003,
+  "children_max_rss_MB": 0.0
+}

@@ -10,8 +10,12 @@
   },
   "stage3_tcad": {
     "devsim_version": "2.11.0",
+    "I_recomb_pre_A": 1.5991546840548554e-05,
+    "I_recomb_post_A": 0.0004157802178542625,
     "I_total_pre_A": 0.004000916723854183,
     "I_total_post_A": 0.0044007053948678975,
+    "recomb_leakage_increase_factor": 26.000000000000004,
+    "total_current_increase_ratio": 1.0999242670136327,
     "leakage_increase_factor": 26.000000000000004,
     "power_dissipation_W": 0.0033005290461509233
   },
