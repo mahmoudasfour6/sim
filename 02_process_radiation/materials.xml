@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material id="1" name="Silicon_Bulk">
+    <density value="2.329" units="g/cm3"/>
+    <nuclide name="Si28" ao="0.9222968"/>
+    <nuclide name="Si29" ao="0.0468316"/>
+    <nuclide name="Si30" ao="0.0308716"/>
+  </material>
+  <material id="2" name="SiO2_Oxide">
+    <density value="2.2" units="g/cm3"/>
+    <nuclide name="Si28" ao="0.9222968"/>
+    <nuclide name="Si29" ao="0.0468316"/>
+    <nuclide name="Si30" ao="0.0308716"/>
+    <nuclide name="O16" ao="1.9952412"/>
+    <nuclide name="O17" ao="0.000758"/>
+    <nuclide name="O18" ao="0.0040008"/>
+  </material>
+</materials>

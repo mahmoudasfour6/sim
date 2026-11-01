@@ -1,0 +1,10 @@
+# AlGaAs / GaAs / AlGaAs Quantum Well Simulation
+$simulation-dimension
+ dimension = 1
+$end_simulation-dimension
+
+$global-parameters
+ lattice-temperature = 300.0
+$end_global-parameters
+
+# Material layers: 10nm Al0.3Ga0.7As / 8nm GaAs QW / 10nm Al0.3Ga0.7As
