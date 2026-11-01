@@ -74,14 +74,14 @@
   "photonics.grcwa.R": {
     "atol": 5e-05,
     "rtol": 0.0,
-    "source": "handoff brief; reproduced independently (nG=11 -> 9 harmonics, unconverged)",
-    "value": 0.0152
+    "source": "independent run of the fixed script, 2026-11-01 (nG=101 -> 97 harmonics, converged)",
+    "value": 0.0013
   },
   "photonics.grcwa.T": {
     "atol": 5e-05,
     "rtol": 0.0,
-    "source": "handoff brief; reproduced independently",
-    "value": 0.9848
+    "source": "independent run of the fixed script, 2026-11-01",
+    "value": 0.9987
   },
   "qe.si_scf.scf_iterations": {
     "atol": 0,
@@ -113,16 +113,34 @@
     "rtol": 1e-06,
     "value": -0.8082
   },
+  "quantum.solcore.e1_hh1_transition_eV": {
+    "atol": 0.00015,
+    "rtol": 0.0,
+    "source": "0.6611 - (-0.8082) from recorded Solcore levels",
+    "value": 1.4693
+  },
   "quantum.sp.E1_meV": {
     "atol": 0.05,
     "rtol": 0.0,
-    "source": "handoff brief; reproduced independently 2026-11-01",
-    "value": 284.2
+    "source": "independent run of the fixed script, 2026-11-01 (\u03942, n_s=1e13 cm^-2)",
+    "value": 114.6
+  },
+  "quantum.sp.E1p_D4_meV": {
+    "atol": 0.05,
+    "rtol": 0.0,
+    "source": "independent run of the fixed script, 2026-11-01 (\u03944)",
+    "value": 180.1
   },
   "quantum.sp.E2_meV": {
     "atol": 0.05,
     "rtol": 0.0,
-    "source": "handoff brief; reproduced independently 2026-11-01",
-    "value": 480.6
+    "source": "independent run of the fixed script, 2026-11-01 (\u03942)",
+    "value": 145.6
+  },
+  "quantum.sp.EF_meV": {
+    "atol": 0.05,
+    "rtol": 0.0,
+    "source": "independent run of the fixed script, 2026-11-01",
+    "value": 135.4
   }
 }

@@ -134,6 +134,9 @@ def test_quantum_iii_v_suite(tmp_path, golden):
         "quantum.kwant.T_max": grab(r"T\(E\) max = " + FLOAT, out),
         "quantum.sp.E1_meV": grab(r"E1 = " + FLOAT + " meV", out),
         "quantum.sp.E2_meV": grab(r"E2 = " + FLOAT + " meV", out),
+        "quantum.sp.E1p_D4_meV": grab(r"E1' = " + FLOAT + " meV", out),
+        "quantum.sp.EF_meV": grab(r"E_F = " + FLOAT + " meV", out),
+        "quantum.solcore.e1_hh1_transition_eV": grab(r"transition = " + FLOAT + " eV", out),
         "quantum.solcore.E_e1_eV": grab(r"E_e1 = " + FLOAT + " eV", out),
         "quantum.solcore.E_hh1_eV": grab(r"E_hh1 = " + FLOAT + " eV", out),
     })

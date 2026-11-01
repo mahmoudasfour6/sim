@@ -52,7 +52,7 @@ def run_ceviche_inverse_design():
 
 def run_grcwa_metasurface():
     # 2D silicon pillar metasurface on glass at lambda = 1.55 um
-    nG = 11
+    nG = 101  # 11 kept only 9 harmonics and overestimated R ~12x
     L1 = [0.8, 0.0]
     L2 = [0.0, 0.8]
     freq = 1.0 / 1.55
