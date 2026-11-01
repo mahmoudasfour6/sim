@@ -89,11 +89,23 @@
     "source": "si_real_scf.pwo (handoff brief)",
     "value": -22.83876677
   },
+  "quantum.kwant.T_max": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 4.97
+  },
   "quantum.solcore.E_e1_eV": {
     "atol": 5e-05,
     "rtol": 0.0,
     "source": "handoff brief (Solcore absolute energy scale, NOT from the GaAs band edge)",
     "value": 0.6611
+  },
+  "quantum.solcore.E_hh1_eV": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": -0.8082
   },
   "quantum.sp.E1_meV": {
     "atol": 0.05,
