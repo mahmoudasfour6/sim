@@ -1,0 +1,4 @@
+[core]
+    remote = winstore
+['remote "winstore"']
+    url = /mnt/c/Users/mahmoud.asfour/sim_backup/dvc-store
