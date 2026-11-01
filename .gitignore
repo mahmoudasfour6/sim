@@ -18,3 +18,8 @@ ihp_sg13g2_pdk/
 
 # Toolchain binaries kept outside git (see 03_tcad_devices/TOOLCHAIN.md)
 tools/openvaf
+
+# TCAD toolchain lives in ~/tcad
+03_tcad_devices/toolchain
+dakota.rst
+/sim_data

@@ -1,0 +1,47 @@
+# Test 2/2: forward I-V sweep of the same diode (4H-SiC turns on near 2.5-3 V)
+Import State File sic_diode.nlp.exo
+start output parameters
+      Output State File sic_diode.iv.exo
+end output parameters
+tpetra is on
+concentration scaling = 1e18
+start Physics Block Semiconductor
+      geometry block is sic
+      standard discretization type is drift diffusion gfem
+      srh recombination is on
+      material model is sicParameter
+end Physics Block Semiconductor
+start Material Block sicParameter
+      material name is 4H-SiC
+      reference material is 4H-SiC
+      start step junction doping
+        acceptor concentration = 1e18
+        donor concentration = 1e17
+        junction location = 0.5
+        dopant order is NP
+        direction is y
+      end step junction doping
+      start Carrier Lifetime Block
+        electron lifetime is constant = 1e-7
+        hole lifetime is constant = 1e-7
+      end Carrier Lifetime Block
+end Material Block sicParameter
+BC is ohmic for cathode on sic fixed at 0.0
+BC is ohmic for anode on sic swept from 0.0 to 3.4
+start sweep options
+  initial step size = 0.1
+  minimum step size = 1e-3
+  maximum step size = 0.2
+  maximum number of steps = 100
+  step size aggressiveness = 0.5
+  return failed on reaching max steps = false
+  hit continuation bound = true
+end sweep options
+initial conditions for ELECTRIC_POTENTIAL in sic is Exodus file
+initial conditions for ELECTRON_DENSITY in sic is Equilibrium Density
+initial conditions for HOLE_DENSITY in sic is Equilibrium Density
+start solver block
+  start tpetra block
+    problem type is parameter sweep
+  end
+end solver block

@@ -1,0 +1,32 @@
+# Test 1/2: nonlinear Poisson (equilibrium) of a 2-D 4H-SiC pn diode, gmsh mesh -> msh2exo.py (microns)
+Import State File diode2d.exo
+start output parameters
+      Output State File sic_diode.nlp.exo
+      Output cell average Variables in sic for scalar "Doping"
+end output parameters
+tpetra is on
+concentration scaling = 1e18
+start Physics Block Semiconductor
+      geometry block is sic
+      standard discretization type is nlp gfem
+      material model is sicParameter
+end Physics Block Semiconductor
+start Material Block sicParameter
+      material name is 4H-SiC
+      reference material is 4H-SiC
+      start step junction doping
+        acceptor concentration = 1e18
+        donor concentration = 1e17
+        junction location = 0.5
+        dopant order is NP
+        direction is y
+      end step junction doping
+end Material Block sicParameter
+BC is ohmic for anode on sic fixed at 0
+BC is ohmic for cathode on sic fixed at 0
+initial conditions for ELECTRIC_POTENTIAL in sic is Equilibrium Potential
+start solver block
+  start tpetra block
+    problem type is steady state
+  end
+end solver block

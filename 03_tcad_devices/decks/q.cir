@@ -1,0 +1,11 @@
+* Gummel-Poon test
+.model QN NPN(IS=1e-30 BF=50 VAF=200 RB=50)
+VBE b 0 2.6
+VCE c 0 5
+Q1 c b 0 QN
+.dc VBE 2.4 2.9 0.25
+.control
+run
+print i(VCE)
+.endc
+.end

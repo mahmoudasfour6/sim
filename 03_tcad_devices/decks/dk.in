@@ -1,0 +1,12 @@
+method
+  multidim_parameter_study partitions = 2 2
+variables
+  continuous_design = 2
+    lower_bounds -1 -1
+    upper_bounds  1  1
+interface
+  analysis_drivers = 'text_book' direct
+responses
+  objective_functions = 1
+  no_gradients
+  no_hessians

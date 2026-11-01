@@ -1,0 +1,6 @@
+outs:
+- md5: 0292c016d7a2a8a2da4efb23e72c9267.dir
+  size: 7021235
+  nfiles: 8
+  hash: md5
+  path: sim_data
