@@ -1,0 +1,149 @@
+# sim_workspace workflow: the single entry point for producing results.
+#   cd ~/sim_workspace && ~/miniforge3/envs/workflow/bin/snakemake --cores 4            # everything
+#   ... snakemake --cores 4 results/electrothermal/summary.json                         # one target
+#   ... snakemake -n                                                                     # dry run
+#   ... snakemake --cores 12 --resources mem_mb=20000 studies                            # sweeps + verification
+# Values from config/local_tuning.yaml (tools/bench_local.py) set QE ranks and sweep workers for this machine.
+# Each rule runs in its conda env (python taken from config.envs_root) with the repo on PYTHONPATH, so the
+# simws package needs no install. Outputs carry provenance (git commit, env, input hashes).
+import os
+
+configfile: "config/config.yaml"
+
+ROOT = os.path.abspath(os.path.join(workflow.basedir, ".."))
+ENVS = os.path.expanduser(config["envs_root"])
+RES = config["results_dir"]
+
+# Local machine tuning written by tools/bench_local.py (falls back to safe defaults before the first benchmark).
+_tune_path = os.path.join(ROOT, "config", "local_tuning.yaml")
+TUNE = {}
+if os.path.exists(_tune_path):
+    import yaml
+    TUNE = yaml.safe_load(open(_tune_path)) or {}
+SWEEP_WORKERS = TUNE.get("sweep", {}).get("best_workers", 4)
+QE_RANKS = TUNE.get("qe", {}).get("best_ranks", 2)
+
+
+def py(env):
+    return f"PATH={ENVS}/{env}/bin:$PATH CONDA_PREFIX={ENVS}/{env} PYTHONPATH={ROOT} {ENVS}/{env}/bin/python"
+
+
+def threads_env(n):
+    return f"OMP_NUM_THREADS={n} OPENBLAS_NUM_THREADS={n} MKL_NUM_THREADS={n}"
+
+
+rule all:
+    input:
+        f"{RES}/materials/parameters.md",
+        f"{RES}/qe_si_scf/summary.json",
+        f"{RES}/particle_strike/comparison.json",
+        f"{RES}/electrothermal/summary.json",
+        f"{RES}/si_film/summary.json",
+        f"{RES}/models/validation.json",
+        f"{RES}/mixed_mode/summary.json",
+        f"{RES}/geant4_track/summary.json",
+
+# Heavier studies, run on demand or by the nightly job:  snakemake --cores 12 studies
+rule studies:
+    input:
+        f"{RES}/sweeps/electrothermal_sobol/summary.json",
+        f"{RES}/verification/electrothermal_mesh.json",
+        f"{RES}/verification/particle_strike_dt.json",
+
+
+rule materials_table:
+    input: "simws/materials/data/silicon.yaml", "simws/materials/data/sic_4h.yaml",
+           "simws/materials/data/gaas.yaml", "simws/materials/data/sio2.yaml"
+    output: f"{RES}/materials/parameters.md"
+    params: py=py("tcad")
+    log: "logs/materials_table.log"
+    shell: "{params.py} workflow/scripts/materials_table.py {output} > {log} 2>&1"
+
+
+rule qe_si_scf:
+    input: pwi="01_materials_dft_md/si_real_scf.pwi"
+    output: f"{RES}/qe_si_scf/summary.json"
+    threads: QE_RANKS
+    resources: mem_mb=1500
+    params: py=py("materials"), pseudo=config["data"]["pseudopotentials"], out=f"{RES}/qe_si_scf"
+    log: "logs/qe_si_scf.log"
+    shell: "{params.py} workflow/scripts/qe_si_scf.py --input {input.pwi} --pseudo-dir {params.pseudo} "
+           "--outdir {params.out} --ranks {threads} > {log} 2>&1"
+
+
+rule particle_strike:
+    input: gold=config["data"]["charon_particle_strike_gold"], code="simws/tcad/particle_strike.py"
+    output: f"{RES}/particle_strike/comparison.json", f"{RES}/particle_strike/devsim_currents.csv"
+    threads: 1
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/particle_strike"
+    log: "logs/particle_strike.log"
+    shell: "{params.env} {params.py} workflow/scripts/particle_strike.py --gold {input.gold} --outdir {params.out} > {log} 2>&1"
+
+
+rule electrothermal:
+    input: code="simws/coupling/electrothermal.py", mat="simws/materials/data/silicon.yaml"
+    output: f"{RES}/electrothermal/summary.json", f"{RES}/electrothermal/temperature_final_bias.vtu"
+    threads: 1
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/electrothermal"
+    log: "logs/electrothermal.log"
+    shell: "{params.env} {params.py} workflow/scripts/electrothermal.py --outdir {params.out} > {log} 2>&1"
+
+
+rule si_film:
+    input: code="simws/quantum/si_film.py", mat="simws/materials/data/silicon.yaml"
+    output: f"{RES}/si_film/summary.json"
+    threads: 1
+    params: py=py("quantum_iii_v"), out=f"{RES}/si_film"
+    log: "logs/si_film.log"
+    shell: "{params.py} workflow/scripts/si_film.py --outdir {params.out} > {log} 2>&1"
+
+
+rule validate_models:
+    input: "simws/tcad/models.py", "simws/validation/device_models.py"
+    output: f"{RES}/models/validation.json"
+    threads: 1
+    resources: mem_mb=600
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/models"
+    log: "logs/validate_models.log"
+    shell: "{params.env} {params.py} workflow/scripts/validate_models.py --outdir {params.out} > {log} 2>&1"
+
+
+rule mixed_mode:
+    input: "simws/tcad/mixed_mode.py", "simws/radiation/track.py"
+    output: f"{RES}/mixed_mode/summary.json"
+    threads: 1
+    resources: mem_mb=1200
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/mixed_mode", lets=config.get("seu_lets", "0.02,0.1,0.5,1,5")
+    log: "logs/mixed_mode.log"
+    shell: "{params.env} {params.py} workflow/scripts/seu.py --outdir {params.out} --lets {params.lets} > {log} 2>&1"
+
+
+rule geant4_track:
+    input: "tools/geant4_track/g4track.cc", "simws/radiation/geant4.py"
+    output: f"{RES}/geant4_track/summary.json", f"{RES}/geant4_track/deposition.csv"
+    threads: 1
+    resources: mem_mb=1500
+    params: py=py("process_rad"), out=f"{RES}/geant4_track"
+    log: "logs/geant4_track.log"
+    shell: "{params.py} workflow/scripts/geant4_track.py --outdir {params.out} > {log} 2>&1"
+
+
+rule electrothermal_sobol:
+    input: "simws/studies/electrothermal_uq.py", "simws/coupling/electrothermal.py"
+    output: f"{RES}/sweeps/electrothermal_sobol/summary.json"
+    threads: SWEEP_WORKERS
+    resources: mem_mb=600 * SWEEP_WORKERS
+    params: py=py("tcad"), out=f"{RES}/sweeps/electrothermal_sobol"
+    log: "logs/electrothermal_sobol.log"
+    shell: "{params.py} workflow/scripts/et_sobol.py --outdir {params.out} --workers {threads} > {log} 2>&1"
+
+
+rule convergence:
+    input: "simws/studies/convergence.py"
+    output: f"{RES}/verification/{{study}}.json"
+    wildcard_constraints: study="electrothermal_mesh|particle_strike_dt"
+    threads: 1
+    resources: mem_mb=1000
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/verification"
+    log: "logs/convergence_{study}.log"
+    shell: "{params.env} {params.py} workflow/scripts/convergence.py --study {wildcards.study} --outdir {params.out} > {log} 2>&1"

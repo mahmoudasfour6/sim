@@ -1,0 +1,15 @@
+# Workspace configuration read by simws.config and the Snakemake workflow.
+# ~ and $VARS are expanded. Nothing else in the codebase should hardcode these paths.
+envs_root: ~/miniforge3/envs
+results_dir: results
+toolchain:
+  charon_exe: ~/tcad/build/src/charon_mp.exe
+  tcad_install_lib: ~/tcad/install/lib
+  dakota: ~/tcad/dakota-6.24.0-public-rhel8.Linux.x86_64-cli/bin/dakota
+  openvaf: tools/openvaf-r.wrapper.sh
+data:
+  pseudopotentials: sim_data/pseudopotentials
+  charon_particle_strike_gold: 03_tcad_devices/particle_strike_ref/gold_currents.csv
+threads:
+  default: 2
+  mpi_ranks: 4

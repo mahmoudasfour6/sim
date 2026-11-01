@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simws"
+version = "0.2.0"
+description = "Shared physics parameters, field I/O and coupling layer for the sim_workspace toolchain"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pyyaml", "pint"]
+
+[project.optional-dependencies]
+coupling = ["scipy", "scikit-fem", "meshio"]
+uq = ["scipy"]
+
+[tool.setuptools.packages.find]
+include = ["simws*"]
+
+[tool.setuptools.package-data]
+"simws.materials" = ["data/*.yaml"]

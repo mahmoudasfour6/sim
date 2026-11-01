@@ -1,0 +1,9 @@
+name: sio2
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:         {value: 3.9,    unit: dimensionless, ref: "Sze & Ng (2007)", status: verified}
+  Eg:            {value: 9.0,    unit: eV,            ref: "Sze & Ng (2007)", status: provisional}
+  density:       {value: 2.2,    unit: g/cm**3,       ref: "thermal oxide, typical", status: provisional}
+  thermal_k:     {value: 0.014,  unit: W/cm/K,        ref: "Sze & Ng (2007)", status: verified}
+  pair_energy:   {value: 17.0,   unit: eV,            ref: "Benedetto & Boesch, IEEE TNS 33, 1317 (1986)", status: verified}
+profiles: {}

@@ -324,7 +324,6 @@ https://conda.anaconda.org/conda-forge/linux-64/freeimage-3.18.0-h3038e8d_27.con
 https://conda.anaconda.org/conda-forge/linux-64/mesalib-26.2.4-h31ca1b8_0.conda#3e4c0e42baa15e86872b9d73537449d9
 https://conda.anaconda.org/conda-forge/linux-64/netcdf4-1.7.4-nompi_py311hd34d2e2_111.conda#d697ebf773f33945402fe3e1fda13635
 https://conda.anaconda.org/conda-forge/linux-64/pyside6-6.11.2-py311h242c0d0_1.conda#65fffae90f6781d3d875536e54f7000f
-https://conda.anaconda.org/conda-forge/noarch/salib-1.6.0-pyhd8ed1ab_0.conda#dddb7f2d27bee484ea8300d450fab11b
 https://conda.anaconda.org/conda-forge/linux-64/matplotlib-3.11.2-py311h968eb38_1.conda#ef4eeae14a1e8bdf4aa6106dc312f2f4
 https://conda.anaconda.org/conda-forge/noarch/meshio-5.3.5-pyhd8ed1ab_0.conda#2ea6ce24274096bf2df6c8c50f373d5b
 https://conda.anaconda.org/conda-forge/linux-64/viskores-1.2.0-cpu_h50c78f2_0.conda#7af195be5c6ca9d40b8670edfb35b7af

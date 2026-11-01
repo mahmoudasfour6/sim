@@ -142,5 +142,53 @@
     "rtol": 0.0,
     "source": "independent run of the fixed script, 2026-11-01",
     "value": 135.4
+  },
+  "simws.electrothermal.I_5V_A_per_cm": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 5.655612536242005
+  },
+  "simws.electrothermal.Tmax_5V_K": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 439.660861774342
+  },
+  "simws.geant4.O16_100MeV.LET_G4EmCalculator": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 3.013682125
+  },
+  "simws.models.breakdown_V_devsim": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 51.295495362489945
+  },
+  "simws.particle_strike.devsim_dc_A_per_cm": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 0.6772911212152206
+  },
+  "simws.particle_strike.devsim_peak_A_per_cm": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 41.99547694095871
+  },
+  "simws.seu.let0p1.collected_fC": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 2.9398732099273057
+  },
+  "simws.seu.let0p1.v_node_min_V": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 0.7008506766836479
   }
 }

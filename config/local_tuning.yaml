@@ -1,0 +1,44 @@
+measured: 2026-11-01 18:19
+machine:
+  cpus_visible: 14
+  memory_GB: 25.4
+qe:
+  seconds_by_ranks:
+    1: 3.11
+    2: 2.49
+    4: 2.47
+    6: 2.4
+    8: 2.38
+  best_ranks: 8
+sweep:
+  by_workers:
+    1:
+      jobs_per_min: 25.86
+      mean_job_s: 2.2
+      peak_rss_MB: 93.9
+    2:
+      jobs_per_min: 48.39
+      mean_job_s: 2.36
+      peak_rss_MB: 94.3
+    4:
+      jobs_per_min: 75.47
+      mean_job_s: 3.02
+      peak_rss_MB: 94.4
+    6:
+      jobs_per_min: 97.57
+      mean_job_s: 3.5
+      peak_rss_MB: 94.7
+    8:
+      jobs_per_min: 115.2
+      mean_job_s: 3.92
+      peak_rss_MB: 94.9
+    12:
+      jobs_per_min: 96.69
+      mean_job_s: 6.61
+      peak_rss_MB: 94.6
+  best_workers: 8
+  peak_rss_MB_per_job: 94.9
+  memory_limited_workers: 192
+snakemake:
+  cores: 14
+  mem_mb: 20840

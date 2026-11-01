@@ -1,0 +1,38 @@
+# Silicon material parameters at the reference temperature (300 K).
+# Every entry: value, unit (pint syntax), ref, status (verified = checked against the cited source,
+# provisional = typical literature value, re-check before publication).
+name: silicon
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:            {value: 11.7,     unit: dimensionless, ref: "Sze & Ng, Physics of Semiconductor Devices, 3rd ed. (2007), App. G", status: verified}
+  Eg:               {value: 1.12,     unit: eV,            ref: "Sze & Ng (2007), App. G", status: verified}
+  n_i:              {value: 9.65e9,   unit: cm**-3,        ref: "Altermatt et al., J. Appl. Phys. 93, 1598 (2003)", status: verified}
+  varshni_Eg0:      {value: 1.170,    unit: eV,            ref: "Thurmond, J. Electrochem. Soc. 122, 1133 (1975)", status: provisional}
+  varshni_alpha:    {value: 4.73e-4,  unit: eV/K,          ref: "Thurmond (1975)", status: provisional}
+  varshni_beta:     {value: 636,      unit: K,             ref: "Thurmond (1975)", status: provisional}
+  mu_n:             {value: 1414,     unit: cm**2/V/s,     ref: "Masetti et al., IEEE TED 30, 764 (1983), lattice-limited mu_max", status: verified}
+  mu_p:             {value: 470.5,    unit: cm**2/V/s,     ref: "Masetti et al. (1983)", status: verified}
+  mu_n_T_exponent:  {value: 2.5,      unit: dimensionless, ref: "common TCAD constant-mobility default, mu ~ (T/300)^-zeta", status: provisional}
+  mu_p_T_exponent:  {value: 2.2,      unit: dimensionless, ref: "common TCAD constant-mobility default", status: provisional}
+  v_sat:            {value: 1.0e7,    unit: cm/s,          ref: "Sze & Ng (2007)", status: verified}
+  m_l:              {value: 0.916,    unit: dimensionless, ref: "Sze & Ng (2007), conduction-band longitudinal mass (m0)", status: verified}
+  m_t:              {value: 0.19,     unit: dimensionless, ref: "Sze & Ng (2007), conduction-band transverse mass (m0)", status: verified}
+  density:          {value: 2.329,    unit: g/cm**3,       ref: "Sze & Ng (2007)", status: verified}
+  thermal_k:        {value: 1.48,     unit: W/cm/K,        ref: "Glassbrenner & Slack, Phys. Rev. 134, A1058 (1964)", status: verified}
+  thermal_k_T_exponent: {value: 1.3,  unit: dimensionless, ref: "power-law fit k ~ (300/T)^a to Glassbrenner & Slack, 300-600 K", status: provisional}
+  heat_capacity:    {value: 0.703,    unit: J/g/K,         ref: "Sze & Ng (2007)", status: verified}
+  pair_energy:      {value: 3.6,      unit: eV,            ref: "mean energy per e-h pair; Klein, J. Appl. Phys. 39, 2029 (1968)", status: verified}
+  ct_beta_n:        {value: 2.0,      unit: dimensionless, ref: "Caughey & Thomas, Proc. IEEE 55, 2192 (1967)", status: verified}
+  ct_beta_p:        {value: 1.0,      unit: dimensionless, ref: "Caughey & Thomas (1967)", status: verified}
+  ii_a_n:           {value: 7.03e5,   unit: 1/cm,          ref: "Van Overstraeten & De Man, Solid-State Electron. 13, 583 (1970)", status: verified}
+  ii_b_n:           {value: 1.231e6,  unit: V/cm,          ref: "Van Overstraeten & De Man (1970)", status: verified}
+  ii_a_p_low:       {value: 1.582e6,  unit: 1/cm,          ref: "Van Overstraeten & De Man (1970), E < E0", status: verified}
+  ii_b_p_low:       {value: 2.036e6,  unit: V/cm,          ref: "Van Overstraeten & De Man (1970), E < E0", status: verified}
+  ii_a_p_high:      {value: 6.71e5,   unit: 1/cm,          ref: "Van Overstraeten & De Man (1970), E > E0", status: verified}
+  ii_b_p_high:      {value: 1.693e6,  unit: V/cm,          ref: "Van Overstraeten & De Man (1970), E > E0", status: verified}
+  ii_E0:            {value: 4.0e5,    unit: V/cm,          ref: "Van Overstraeten & De Man (1970), hole-coefficient switch field", status: verified}
+profiles:
+  # Values used by Sandia Charon's built-in "Silicon" material, needed to reproduce Charon decks exactly.
+  charon:
+    n_i:   {value: 1.44712e10, unit: cm**-3, ref: "measured from Charon particleStrike gold file: sqrt(n*p) at t=0", status: verified}
+    eps_r: {value: 11.9, unit: dimensionless, ref: "Charon particleStrike deck (relative permittivity = 11.9)", status: verified}

@@ -1,0 +1,1 @@
+"""Validated quantum-confinement solvers."""

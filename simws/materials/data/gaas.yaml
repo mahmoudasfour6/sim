@@ -1,0 +1,14 @@
+name: gaas
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:         {value: 12.9,   unit: dimensionless, ref: "Sze & Ng (2007), App. G", status: verified}
+  Eg:            {value: 1.424,  unit: eV,            ref: "Sze & Ng (2007), App. G", status: verified}
+  n_i:           {value: 2.1e6,  unit: cm**-3,        ref: "Sze & Ng (2007), App. G", status: provisional}
+  m_e:           {value: 0.067,  unit: dimensionless, ref: "Vurgaftman, Meyer & Ram-Mohan, JAP 89, 5815 (2001)", status: verified}
+  m_hh:          {value: 0.51,   unit: dimensionless, ref: "Vurgaftman et al. (2001), [001] heavy hole", status: provisional}
+  mu_n:          {value: 8500,   unit: cm**2/V/s,     ref: "Sze & Ng (2007)", status: verified}
+  mu_p:          {value: 400,    unit: cm**2/V/s,     ref: "Sze & Ng (2007)", status: verified}
+  density:       {value: 5.317,  unit: g/cm**3,       ref: "Sze & Ng (2007)", status: verified}
+  thermal_k:     {value: 0.55,   unit: W/cm/K,        ref: "Sze & Ng (2007)", status: verified}
+  pair_energy:   {value: 4.2,    unit: eV,            ref: "Klein (1968)", status: provisional}
+profiles: {}

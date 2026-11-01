@@ -24,3 +24,7 @@ tools/openvaf
 dakota.rst
 /sim_data
 *.timings
+results/
+logs/
+.snakemake/
+tools/geant4_track/g4track

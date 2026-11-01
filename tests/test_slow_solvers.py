@@ -191,3 +191,72 @@ def test_chgnet_si_energy(tmp_path, golden):
     script.write_text(CHGNET_SI)
     out = run_in_env("materials", [env_python("materials"), script], tmp_path, timeout=600)
     golden.verify({"mlip.chgnet.si_energy_eV_per_atom": grab(r"CHGNet Si E = " + FLOAT, out)})
+
+
+# --------------------------------------------------------------------------- simws package (infrastructure)
+def _simws_env():
+    return {"PYTHONPATH": str(REPO)}
+
+
+def test_simws_unit_suite_in_tcad_env():
+    """Package unit tests in the tcad env, where every dependency exists: nothing may be skipped there."""
+    out = run_in_env("tcad", [env_python("tcad"), "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/unit"],
+                     REPO, timeout=900, extra_env=_simws_env())
+    assert re.search(r"\d+ passed", out) and "skipped" not in out and "failed" not in out, out[-1500:]
+
+
+def test_simws_particle_strike_matches_charon(tmp_path, golden):
+    gold = REPO / "03_tcad_devices" / "particle_strike_ref" / "gold_currents.csv"
+    if not gold.exists():
+        pytest.skip("Charon gold currents not present")
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "particle_strike.py",
+                        "--gold", gold, "--outdir", tmp_path], REPO, timeout=900, threads=1, extra_env=_simws_env())
+    cmp = json.loads((tmp_path / "comparison.json").read_text())["results"]
+    assert cmp["max_abs_dev_in_pulse_frac_of_peak"] < 0.015, cmp
+    golden.verify({"simws.particle_strike.devsim_peak_A_per_cm": cmp["devsim"]["peak"],
+                   "simws.particle_strike.devsim_dc_A_per_cm": cmp["devsim"]["dc"]})
+
+
+def test_simws_electrothermal_resistor(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "electrothermal.py",
+                        "--outdir", tmp_path, "--biases", "1,5"], REPO, timeout=900, threads=1, extra_env=_simws_env())
+    pts = json.loads((tmp_path / "summary.json").read_text())["results"]["points"]
+    for p in pts:
+        assert p["converged"] and p["joule_vs_IV_rel_error"] < 1e-10 and p["energy_balance_rel_error"] < 1e-8
+    golden.verify({"simws.electrothermal.I_5V_A_per_cm": pts[-1]["current_A_per_cm"],
+                   "simws.electrothermal.Tmax_5V_K": pts[-1]["T_max_K"]})
+
+
+# --------------------------------------------------------------------------- simws items 6-9 (physics, UQ, verification)
+def test_simws_device_model_validation(tmp_path, golden):
+    """Velocity saturation vs Caughey-Thomas closed form; avalanche breakdown vs ionization integral."""
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "validate_models.py", "--outdir", tmp_path],
+               REPO, timeout=1500, threads=1, extra_env=_simws_env())
+    res = json.loads((tmp_path / "validation.json").read_text())["results"]
+    assert res["pass"], res
+    golden.verify({"simws.models.breakdown_V_devsim": res["breakdown_V_devsim"]})
+
+
+def test_simws_mixed_mode_rc_and_seu(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "seu.py", "--outdir", tmp_path,
+                        "--lets", "0.1"], REPO, timeout=2400, threads=1, extra_env=_simws_env())
+    res = json.loads((tmp_path / "summary.json").read_text())["results"]
+    assert res["rc_check"]["worst_abs_dev_frac_of_vinf"] < 2e-3, res["rc_check"]
+    s = res["seu"][0]
+    assert abs(s["track_mesh_correction"] - 1) < 0.05
+    assert 0 < s["collected_charge_substrate_fC"] < 1.2 * s["deposited_charge_fC"]
+    golden.verify({"simws.seu.let0p1.v_node_min_V": s["v_node_min_V"],
+                   "simws.seu.let0p1.collected_fC": s["collected_charge_substrate_fC"]})
+
+
+def test_simws_geant4_track(tmp_path, golden):
+    if not (ENVS / "process_rad" / "bin" / "geant4-config").exists():
+        pytest.skip("Geant4 not installed in process_rad")
+    run_in_env("process_rad", [env_python("process_rad"), REPO / "workflow" / "scripts" / "geant4_track.py",
+                               "--outdir", tmp_path, "--events", "100"], REPO, timeout=1500, extra_env=_simws_env())
+    res = json.loads((tmp_path / "summary.json").read_text())["results"]
+    # energy deposited near the entrance agrees with the G4EmCalculator stopping power (delta electrons escape
+    # the first bins, cut 1 um, so a few % either way is expected)
+    assert abs(res["LET_ratio_entrance_deposit_to_G4EmCalculator"] - 1) < 0.08, res
+    assert res["radius_90pct_energy_um"] < 0.5
+    golden.verify({"simws.geant4.O16_100MeV.LET_G4EmCalculator": res["meta"]["entrance_LET_MeV_cm2_per_mg"]})

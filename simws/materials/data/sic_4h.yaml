@@ -1,0 +1,17 @@
+# 4H-SiC at 300 K. Anisotropic quantities are given perpendicular to the c-axis unless noted.
+# Most entries are typical literature values (status: provisional) -- confirm against the device-specific
+# calibration source before publishing.
+name: sic_4h
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:         {value: 9.66,   unit: dimensionless, ref: "Ioffe NSM archive, 4H-SiC (perpendicular to c)", status: provisional}
+  Eg:            {value: 3.26,   unit: eV,            ref: "Ioffe NSM archive", status: provisional}
+  n_i:           {value: 5.0e-9, unit: cm**-3,        ref: "Ioffe NSM archive (order of magnitude)", status: provisional}
+  mu_n:          {value: 950,    unit: cm**2/V/s,     ref: "Ioffe NSM archive (perpendicular to c)", status: provisional}
+  mu_p:          {value: 115,    unit: cm**2/V/s,     ref: "Ioffe NSM archive", status: provisional}
+  v_sat:         {value: 2.2e7,  unit: cm/s,          ref: "Ioffe NSM archive", status: provisional}
+  density:       {value: 3.21,   unit: g/cm**3,       ref: "Ioffe NSM archive", status: provisional}
+  thermal_k:     {value: 3.7,    unit: W/cm/K,        ref: "Ioffe NSM archive (3.3-4.9 depending on doping/orientation)", status: provisional}
+  heat_capacity: {value: 0.69,   unit: J/g/K,         ref: "Ioffe NSM archive", status: provisional}
+  pair_energy:   {value: 7.8,    unit: eV,            ref: "literature range 7.6-8.4 eV for 4H-SiC", status: provisional}
+profiles: {}

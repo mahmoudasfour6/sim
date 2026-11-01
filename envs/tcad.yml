@@ -268,7 +268,6 @@ dependencies:
   - readline=8.3=hd6e31c0_1
   - rich=15.0.0=pyhcf101f3_0
   - s2n=1.7.7=ha5dc4ae_0
-  - salib=1.6.0=pyhd8ed1ab_0
   - scipy=1.17.1=py311hbe70eeb_1
   - sdl2=2.32.56=h54a6638_0
   - sdl3=3.4.18=h5330f5c_0
@@ -376,6 +375,8 @@ dependencies:
       - pyzmq==27.2.0
       - reprint==0.6.0
       - requests==2.34.2
+      - salib==1.5.1
+      - scikit-fem==12.0.2
       - scikit-rf==2.2.0
       - semver==3.1.0
       - stack-data==0.6.3
