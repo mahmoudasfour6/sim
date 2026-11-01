@@ -15,3 +15,6 @@ tmp_qe/
 # External repos (tracked separately)
 ihp_sg13g2_pdk/
 *.npz
+
+# Toolchain binaries kept outside git (see 03_tcad_devices/TOOLCHAIN.md)
+tools/openvaf
