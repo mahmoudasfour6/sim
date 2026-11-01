@@ -1,0 +1,17 @@
+# Large simulation binary meshes & outputs
+*.exo
+*.exo.*
+*.vtk
+*.vtp
+*.vtu
+*.msh
+*.h5
+*.hdf5
+*.tar.gz
+__pycache__/
+tmp_qe/
+*.log
+
+# External repos (tracked separately)
+ihp_sg13g2_pdk/
+*.npz

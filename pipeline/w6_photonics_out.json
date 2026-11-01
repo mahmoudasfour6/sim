@@ -1,0 +1,11 @@
+{
+  "workspace": "06_photonics_spl",
+  "conda_env": "spl",
+  "n0_si_1550nm": 3.476,
+  "dn_thermo_optic": 0.002821607017051876,
+  "dn_plasma_soref_bennett": -4.8098299493867593e-08,
+  "eps_si_pre": 12.082576,
+  "eps_si_post_strike": 12.102199438797896,
+  "ceviche_optical_phase_shift_rad": -0.005900634693104103,
+  "ceviche_transmission_ratio": 1.0000250444358685
+}

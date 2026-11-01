@@ -1,0 +1,12 @@
+* Cryogenic 77K Heavy-Ion SEE Hardening Comparison (4_SOI_GR_CircuitClamp)
+VCC vdd 0 DC 1.8
+RL vdd out 150
+CL out 0 4.3000e-14
+Cmu out b_int 2.2f
+Rb b_int 0 18.0
+Cpi b_int 0 48.2f
+Vsense out ion_n DC 0.0
+Iion ion_n 0 EXP(0 6.50000e-04 10p 8.0000e-13 12p 6.8000e-12)
+.tran 0.4p 100p
+.print tran i(Vsense) v(out)
+.end

@@ -1,0 +1,13 @@
+* Strained SiGe HBT Heavy-Ion Single-Event Transient (SET) (300K_Pristine_SEE)
+VCC vdd 0 DC 1.8
+RL vdd out 150
+CL out 0 18f
+Cmu out b_int 2.2f
+Rb b_int 0 18.0
+Cpi b_int 0 2.4600e-14
+* Voltage-sense 0V source in series with Collector heavy-ion current source
+Vsense out ion_n DC 0.0
+Iion ion_n 0 EXP(0 1.79104e-03 10p 2.2000e-12 12p 2.9000e-11)
+.tran 0.5p 140p
+.print tran i(Vsense) v(out)
+.end

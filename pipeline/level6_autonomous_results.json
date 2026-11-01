@@ -1,0 +1,23 @@
+{
+  "level3_amr_nodes": 2385,
+  "level3_amr_triangles": 4678,
+  "level3_peak_transient_current_mA": 2.7749101892327293,
+  "level3_peak_transient_temp_K": 315.16849583734995,
+  "level4_max_von_mises_stress_MPa": 9.46745763840376,
+  "level4_spice_min_node_voltage_V": -2.08573,
+  "level4_spice_seu_bit_flip": true,
+  "level5_min_thermal_conductivity_ratio": 0.32444462729382423,
+  "level6_surrogate_r2": 0.9092643107408578,
+  "level6_sobol_total_indices": {
+    "Trench_Depth": 0.10166954138535488,
+    "Corner_Radius": 0.1788158744384484,
+    "Epi_Doping": 0.839702628773866,
+    "Oxide_Thick": 0.011856579312361596,
+    "Ion_LET": 0.2072415532071844
+  },
+  "level6_rhbd_baseline_E_V_cm": 256888.16675329913,
+  "level6_rhbd_optimized_E_V_cm": 123984.50852808851,
+  "level6_rhbd_baseline_Q_fC": 1619.2437169451616,
+  "level6_rhbd_optimized_Q_fC": 433.78421906429935,
+  "dashboard_png": "/home/mahmoudasfour/sim_workspace/pipeline/level6_autonomous_dashboard.png"
+}

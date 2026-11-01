@@ -1,0 +1,23 @@
+{
+  "stage1_materials": {
+    "si_cell_volume_A3": 160.191477991,
+    "pka_energy_eV": 200.0
+  },
+  "stage2_process_rad": {
+    "fluence_cm2": 100000000000000.0,
+    "tau_pre_s": 1e-06,
+    "tau_post_s": 3.846153846153846e-08
+  },
+  "stage3_tcad": {
+    "devsim_version": "2.11.0",
+    "I_total_pre_A": 0.004000916723854183,
+    "I_total_post_A": 0.0044007053948678975,
+    "leakage_increase_factor": 26.000000000000004,
+    "power_dissipation_W": 0.0033005290461509233
+  },
+  "stage4_fem": {
+    "T_sink_K": 300.0,
+    "T_peak_K": 300.11157324666937,
+    "delta_T_K": 0.11157324666936574
+  }
+}

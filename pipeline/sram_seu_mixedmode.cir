@@ -1,0 +1,11 @@
+* Level 4 Mixed-Mode TCAD -> SPICE Single-Event Upset (SEU) Node Test
+Vdd vdd 0 DC 1.8
+* PMOS pull-up restoring load (effective R_pullup = 2.2 kOhm) + storage node capacitance (C_node = 25 fF)
+Rpull vdd q_node 2200
+Cnode q_node 0 25f
+* Coupled TCAD Heavy-Ion + Avalanche Transient Photocurrent Source
+Irad q_node 0 PWL(0.0000e+00 0.00000e+00 1.0000e-12 4.75954e-04 1.3709e-12 6.36541e-04 1.8793e-12 8.43538e-04 2.5763e-12 1.10388e-03 3.5318e-12 1.41990e-03 4.8417e-12 1.78374e-03 6.6373e-12 2.16941e-03 9.0990e-12 2.52388e-03 1.2474e-11 2.76288e-03 1.7100e-11 2.77491e-03 2.3442e-11 2.67884e-03 3.2136e-11 2.55253e-03 4.4054e-11 2.38899e-03 6.0393e-11 2.18169e-03 8.2791e-11 1.92642e-03 1.1350e-10 1.62430e-03 1.5559e-10 1.28560e-03 2.1330e-10 9.32994e-04 2.9240e-10 6.01194e-04 4.0085e-10 3.29127e-04 5.4951e-10 1.44102e-04 7.5332e-10 4.64459e-05 1.0327e-09 9.83681e-06 1.4157e-09 1.17153e-06 1.9408e-09 6.33763e-08 2.6606e-09 1.16214e-09 3.6473e-09 4.83617e-12 5.0000e-09 2.63494e-15)
+.ic V(q_node)=1.8
+.tran 5p 3n uic
+.print tran V(q_node)
+.end

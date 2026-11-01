@@ -1,0 +1,7 @@
+{
+  "workspace": "05_quantum_iii_v",
+  "conda_env": "quantum_iii_v",
+  "subband_E1_eV": 0.0791540721100148,
+  "oxide_quantum_decay_um": 0.006,
+  "kwant_ballistic_transmission_2e2_h": 2.000000000000001
+}

@@ -1,0 +1,11 @@
+{
+  "mesh_nodes": 2113,
+  "mesh_triangles": 4096,
+  "picard_iterations": 9,
+  "converged_max_dT_K": 0.000435154221349876,
+  "peak_temperature_K": 307.9309174158411,
+  "peak_electric_field_V_cm": 36256.6986363535,
+  "peak_joule_power_W_cm3": 2657103177.3048596,
+  "vtk_file": "/home/mahmoudasfour/sim_workspace/pipeline/coupled_multiphysics_2d.vtk",
+  "png_dashboard": "/home/mahmoudasfour/sim_workspace/pipeline/coupled_multiphysics_2d.png"
+}
