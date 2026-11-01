@@ -1,0 +1,110 @@
+{
+  "charon.sic_diode_iv.final_row.col0": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 3.4
+  },
+  "charon.sic_diode_iv.final_row.col1": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 0.0
+  },
+  "charon.sic_diode_iv.final_row.col2": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 50.9314422
+  },
+  "charon.sic_diode_iv.final_row.col3": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": -50.9314422
+  },
+  "devsim.diode_1d.I_top_0p5V": {
+    "atol": 0.0,
+    "rtol": 0.0001,
+    "source": "independent DEVSIM 2.11.2 run of diode_1d.py, 2026-11-01",
+    "value": 0.018155155173288442
+  },
+  "devsim.diode_1d.Ie_top_0p5V": {
+    "atol": 0.0,
+    "rtol": 0.0001,
+    "source": "independent DEVSIM 2.11.2 run of diode_1d.py, 2026-11-01",
+    "value": 0.011810543175282576
+  },
+  "devsim.diode_1d.Ih_top_0p5V": {
+    "atol": 0.0,
+    "rtol": 0.0001,
+    "source": "independent DEVSIM 2.11.2 run of diode_1d.py, 2026-11-01",
+    "value": 0.006344611998005865
+  },
+  "fem.electrothermal.T_max_K": {
+    "atol": 0.005,
+    "rtol": 0.0,
+    "source": "handoff brief (printed to 2 decimals)",
+    "value": 376.06
+  },
+  "fem.electrothermal.V_max_V": {
+    "atol": 0.005,
+    "rtol": 0.0,
+    "source": "handoff brief (printed to 2 decimals)",
+    "value": 1.5
+  },
+  "photonics.ceviche.max_grad": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 3.265e-13
+  },
+  "photonics.ceviche.output_intensity": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": 4.128e-11
+  },
+  "photonics.grcwa.R": {
+    "atol": 5e-05,
+    "rtol": 0.0,
+    "source": "handoff brief; reproduced independently (nG=11 -> 9 harmonics, unconverged)",
+    "value": 0.0152
+  },
+  "photonics.grcwa.T": {
+    "atol": 5e-05,
+    "rtol": 0.0,
+    "source": "handoff brief; reproduced independently",
+    "value": 0.9848
+  },
+  "qe.si_scf.scf_iterations": {
+    "atol": 0,
+    "rtol": 0.0,
+    "source": "si_real_scf.pwo (handoff brief)",
+    "value": 7
+  },
+  "qe.si_scf.total_energy_Ry": {
+    "atol": 1e-06,
+    "rtol": 0.0,
+    "source": "si_real_scf.pwo (handoff brief)",
+    "value": -22.83876677
+  },
+  "quantum.solcore.E_e1_eV": {
+    "atol": 5e-05,
+    "rtol": 0.0,
+    "source": "handoff brief (Solcore absolute energy scale, NOT from the GaAs band edge)",
+    "value": 0.6611
+  },
+  "quantum.sp.E1_meV": {
+    "atol": 0.05,
+    "rtol": 0.0,
+    "source": "handoff brief; reproduced independently 2026-11-01",
+    "value": 284.2
+  },
+  "quantum.sp.E2_meV": {
+    "atol": 0.05,
+    "rtol": 0.0,
+    "source": "handoff brief; reproduced independently 2026-11-01",
+    "value": 480.6
+  }
+}
