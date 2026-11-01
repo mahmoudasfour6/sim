@@ -33,3 +33,9 @@ CMAKE_INSTALL_PREFIX:PATH=/home/mahmoudasfour/tcad/install
 TPL_BLAS_LIBRARIES:FILEPATH=/home/mahmoudasfour/miniforge3/envs/charon/lib/libblas.so
 TPL_LAPACK_LIBRARIES:FILEPATH=/home/mahmoudasfour/miniforge3/envs/charon/lib/liblapack.so
 ```
+
+## OpenVAF runtime notes
+- The binary needs libLLVM 18, loaded from the `eda` env (`~/miniforge3/envs/eda/lib`). The `tcad` env's OpenVAF therefore depends on `eda` existing.
+- `openvaf-r` in the `eda` and `tcad` envs is a wrapper script (versioned as `tools/openvaf-r.wrapper.sh`), not part of the conda lockfiles. After rebuilding either env, restore it with:
+  `install -m 755 tools/openvaf-r.wrapper.sh ~/miniforge3/envs/<env>/bin/openvaf-r`
+- This build reports its version as "unknown"; the sha256 above is its identity.
