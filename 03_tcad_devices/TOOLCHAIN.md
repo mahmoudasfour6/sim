@@ -9,7 +9,7 @@ Toolchain root: `~/tcad` (symlinked as `03_tcad_devices/toolchain`, not in git)
 | TriBITS | `769f615fafbaac66be8caa47d2916b1e9b078f5d` | ~/tcad/TriBITS |
 | Charon executable | source build | ~/tcad/build/src/charon_mp.exe |
 | Dakota | 6.24.0 RHEL8 CLI binary | ~/tcad/dakota-6.24.0-public-rhel8.Linux.x86_64-cli |
-| OpenVAF-Reloaded | v24.0.2mob, sha256 `` | ~/opt/openvaf (symlinked as tools/openvaf) |
+| OpenVAF-Reloaded | v24.0.2mob, sha256 `ca1037be094cbfecb1249a1f220c9c390bc265015dd177ec27800ed365d6ef3a` | ~/opt/openvaf (symlinked as tools/openvaf) |
 
 ## Charon build options (~/tcad/conda.opts)
 ```
