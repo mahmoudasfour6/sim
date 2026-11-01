@@ -53,6 +53,12 @@
     "source": "handoff brief (printed to 2 decimals)",
     "value": 1.5
   },
+  "mlip.chgnet.si_energy_eV_per_atom": {
+    "atol": 0.0,
+    "recorded": "2026-11-01",
+    "rtol": 1e-06,
+    "value": -5.312294
+  },
   "photonics.ceviche.max_grad": {
     "atol": 0.0,
     "recorded": "2026-11-01",

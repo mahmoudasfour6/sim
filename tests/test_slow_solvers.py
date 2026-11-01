@@ -168,3 +168,23 @@ def test_charz_metrology_matches_committed():
            if isinstance(v, (int, float)) and not isinstance(v, bool)
            and fresh.get(k) != pytest.approx(v, rel=1e-3)]
     assert not bad, "charz metrology changed:\n  " + "\n  ".join(bad)
+
+
+# --------------------------------------------------------------------------- ML potentials
+CHGNET_SI = '''
+import torch, mace, nequip
+from ase.build import bulk
+from pymatgen.io.ase import AseAtomsAdaptor
+from chgnet.model import CHGNet
+s = AseAtomsAdaptor.get_structure(bulk("Si", "diamond", a=5.431))
+p = CHGNet.load(use_device="cpu", verbose=False).predict_structure(s)
+print(f"CHGNet Si E = {float(p['e']):.6f} eV/atom")
+'''
+
+
+def test_chgnet_si_energy(tmp_path, golden):
+    """CHGNet on bulk Si (CPU); also imports MACE and NequIP. Guards the torch/MLIP stack."""
+    script = tmp_path / "chgnet_si.py"
+    script.write_text(CHGNET_SI)
+    out = run_in_env("materials", [env_python("materials"), script], tmp_path, timeout=600)
+    golden.verify({"mlip.chgnet.si_energy_eV_per_atom": grab(r"CHGNet Si E = " + FLOAT, out)})
