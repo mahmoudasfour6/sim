@@ -349,3 +349,14 @@ def test_simws_sic_checks(tmp_path, golden):
     r = json.loads((tmp_path / "sic_checks.json").read_text())["results"]
     assert r["pass"], {k: v.get("pass") for k, v in r.items() if isinstance(v, dict)}
     golden.verify({"simws.sic.BV_2e17_V": r["breakdown"]["BV_devsim"]})
+
+
+# --------------------------------------------------------------------------- simws 0.6 (SiGe)
+def test_simws_sige_checks(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "sige.py", "--what", "checks",
+                        "--outdir", tmp_path], REPO, timeout=3600, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "sige_checks.json").read_text())["results"]
+    assert r["pass"], {k: v.get("pass") for k, v in r.items() if isinstance(v, dict)}
+    golden.verify({"simws.sige.IC_ratio_0.6V": r["collector_enhancement"]["cases"]["VBE_0.6"]["Jn_ratio_devsim"],
+                   "simws.sige.buried_shift_V": r["buried_channel"]["shift_V"],
+                   "simws.sige.strike_QC_let0.1_fC": r["strike_conservation"]["Q_C_fC"][0]})

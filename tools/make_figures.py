@@ -317,6 +317,93 @@ def fig_mos_variability(F, plt):
     plt.close(fig)
 
 
+def fig_sige_gummel(F, plt):
+    s = F.j("sige/devices.json")["results"]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.8, 2.6))
+    data = {}
+    for key, c in (("SiGe", CAT[0]), ("Si", CAT[1])):
+        g = s["gummel"][key]
+        V, IC, IB = np.array(g["VBE"]), np.array(g["IC_A"]), np.array(g["IB_A"])
+        a1.semilogy(V, IC, color=c, label=f"I_C {key}")
+        a1.semilogy(V, IB, color=c, linestyle=(0, (4, 2)),
+                    label=f"I_B {key}" + (" (same as SiGe)" if key == "Si" else ""))
+        a2.semilogx(IC, IC / IB, color=c, label=key)
+        data[key] = {"VBE": V, "IC_A_per_um": IC, "IB_A_per_um": IB, "V_A": s["early"][key]["V_A"]}
+    a1.set_xlabel("V_BE (V)"); a1.set_ylabel("current (A/µm)")
+    a1.set_title(f"Gummel plot, Ge graded 0→{s['ge_peak']:g}", loc="left")
+    a1.legend(loc="upper left", fontsize=7)
+    a2.set_xlabel("I_C (A/µm)"); a2.set_ylabel("β = I_C / I_B")
+    va = s["early"]
+    a2.set_title(f"Gain (V_A: Si {va['Si']['V_A']:.0f} V, SiGe {va['SiGe']['V_A']:.0f} V)", loc="left")
+    a2.legend(loc="upper left")
+    F.save(fig, "fig_sige_gummel", data, ["sige/devices.json"])
+    plt.close(fig)
+
+
+def fig_sige_buried_channel(F, plt):
+    s = F.j("sige/devices.json")["results"]["mos"]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.8, 2.6))
+    sg, si = s["x_0.25"], s["x_0"]
+    V = -np.array(sg["V_sheets"])
+    a1.semilogy(V, sg["well_cm2"], color=CAT[0], label="SiGe well")
+    a1.semilogy(V, sg["cap_cm2"], color=CAT[1], label="Si cap (surface)")
+    a1.semilogy(V, np.array(si["well_cm2"]) + np.array(si["cap_cm2"]), color=CAT[2], linestyle=(0, (4, 2)),
+                label="same stack, no Ge")
+    a1.set_ylim(1e8, None)
+    a1.set_xlabel("−V_gate (V)"); a1.set_ylabel("hole sheet (cm⁻²)")
+    a1.set_title("Buried channel: well fills first", loc="left")
+    a1.legend(loc="lower right", fontsize=7)
+    a2.plot(sg["V_cv"], sg["C_over_Cox"], color=CAT[0], label="Si₀.₇₅Ge₀.₂₅ well")
+    a2.plot(si["V_cv"], si["C_over_Cox"], color=CAT[1], label="no Ge")
+    a2.set_ylim(0, 1.05)
+    a2.set_xlabel("V_gate (V)"); a2.set_ylabel("C / C_ox")
+    a2.set_title("Quasi-static C–V: holes arrive earlier", loc="left")
+    a2.legend(loc="center left")
+    F.save(fig, "fig_sige_buried_channel", {"SiGe_x0.25": sg, "Si": si}, ["sige/devices.json"])
+    plt.close(fig)
+
+
+def fig_hbt_tid(F, plt):
+    t = F.j("sige/devices.json")["results"]["tid"]
+    D = np.array(t["dose_krad"]); V = np.array(t["VBE"]); IB = np.array(t["IB_A"]); IC = np.array(t["IC_A"])
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.8, 2.6))
+    a1.semilogy(V, IC[0], color=INK2, label="I_C (all doses)")
+    a1.semilogy(V, IB[0], color=MUTED, linestyle=(0, (4, 2)), label="I_B pre-rad")
+    for d, row, c in zip(D[1:], IB[1:], ramp(len(D) - 1)):
+        a1.semilogy(V, row, color=c, label=f"I_B {d:g} krad")
+    a1.set_xlabel("V_BE (V)"); a1.set_ylabel("current (A/µm)")
+    a1.set_title("TID: excess base current, I_C unchanged", loc="left")
+    fig.legend(*a1.get_legend_handles_labels(), loc="upper center", ncol=4, fontsize=7, bbox_to_anchor=(0.5, -0.02))
+    i5 = int(np.argmin(np.abs(V - 0.5)))
+    sel = D > 0
+    beta = IC[:, i5] / IB[:, i5]
+    a2.semilogx(D[sel], beta[sel] / beta[0], color=CAT[0], marker="o", ms=4)
+    a2.set_ylim(0, 1.05)
+    a2.set_xlabel("dose (krad(SiO₂))"); a2.set_ylabel("β / β_pre at V_BE = 0.5 V")
+    a2.set_title("Gain degradation (uncalibrated oxide)", loc="left")
+    F.save(fig, "fig_hbt_tid", {"dose_krad": D, "VBE": V, "IB_A": IB, "IC_A": IC, "N_it": t["N_it"], "N_ot": t["N_ot"],
+                                "assumptions": t["assumptions"]}, ["sige/devices.json"])
+    plt.close(fig)
+
+
+def fig_hbt_strike(F, plt):
+    s = F.j("sige/devices.json")["results"]["strike"]
+    fig, ax = plt.subplots(figsize=(3.4, 2.6))
+    data = {}
+    for key, c in (("SiGe", CAT[0]), ("Si", CAT[1])):
+        L = np.array([r["let"] for r in s[key]]); q = np.array([r["Q_collector_fC"] for r in s[key]])
+        ax.loglog(L, q, color=c, marker="o", ms=4, label=f"collected, {key} HBT")
+        data[key] = {"LET": L, "Q_collector_fC": q}
+    qd = np.array([r["Q_deposited_fC"] for r in s["SiGe"]])
+    ax.loglog(L, qd, color=INK2, linestyle=(0, (4, 2)), label="deposited (1.5 µm track)")
+    ax.set_xlabel("LET (MeV cm²/mg)"); ax.set_ylabel("charge (fC per µm, planar 2D)")
+    ax.set_title("Ion strike through the emitter, V_C = 2 V", loc="left")
+    ax.legend(loc="upper left", fontsize=7)
+    data["deposited_fC"] = qd
+    F.save(fig, "fig_hbt_strike", data, ["sige/devices.json"])
+    plt.close(fig)
+
+
 def methods_table(F):
     """Every material parameter the simulations use, with value, unit, status and reference (Markdown + LaTeX)."""
     from simws.materials import available, load
@@ -357,6 +444,10 @@ def main():
     F.run("mos cv", lambda: fig_mos_cv(F, plt))
     F.run("tid", lambda: fig_tid(F, plt))
     F.run("mos variability", lambda: fig_mos_variability(F, plt))
+    F.run("sige gummel", lambda: fig_sige_gummel(F, plt))
+    F.run("sige buried channel", lambda: fig_sige_buried_channel(F, plt))
+    F.run("hbt tid", lambda: fig_hbt_tid(F, plt))
+    F.run("hbt strike", lambda: fig_hbt_strike(F, plt))
     F.run("methods table", lambda: methods_table(F))
     (F.out / "INDEX.json").write_text(json.dumps({"made": F.made, "skipped": F.skipped}, indent=1))
     print(f"figures in {F.out}: {len(F.made)} made")

@@ -115,6 +115,34 @@ $W/snakemake paper --cores 12 --resources mem_mb=20000     # everything + figure
   aluminium incomplete ionization, Caughey-Thomas mobility with anisotropy along the c-axis, Hatakeyama 2004
   impact ionization along/across c. Leakage in SiC is ~1e-30 A: probe breakdown with injected carriers.
 
+## simws 0.6: SiGe
+
+- **Material** (`sige.yaml`, `Physics(ge="<x expression>", ge_mode="strained"|"relaxed")`): any Ge profile, as a
+  constant or an expression of x/y. Strained on Si(001): gap reduction 0.75x eV, all in the valence band
+  (conduction offset taken as 0, provisional), Nc ratio 2/3 and (NcNv) ratio exp(-sqrt(5x)). Relaxed: the
+  Ioffe gap fit and the Rieger-Vogl valence offset. Permittivity interpolated to Ge. Mobility factors are 1.0
+  (provisional): calibrate them with measured Gummel data. The drift-diffusion core now carries general band
+  edges (dEc, dEv), so heterojunctions are exact at equilibrium (n p = n_ie^2 to 4e-14, no current).
+- **SiGe HBT** (`simws.tcad.hbt`): 2D npn with emitter, intrinsic/extrinsic base, collector and subcollector;
+  `gummel`, `early_voltage`; `ge_peak=0` gives the identical Si BJT. Checked: the SiGe/Si collector-current
+  ratio equals the generalized Moll-Ross (Kroemer) integral on the device's own solution to 0.05 %, and so
+  does the ideality (graded base: about 62 mV/dec, above 59.5). Graded Ge raises I_C about 6x at 0.6 V with the
+  same base current, and the Early voltage about 4x (21 -> 88 V for the default device).
+- **Buried strained-SiGe pMOS channel** (`MOSCase(cap_nm, well_nm, ge_x)`, `hole_sheets`): holes fill the SiGe
+  well first; past about -1.6 V the Si cap surface takes over (two-step C-V). Checked: the hole onset moves by
+  0.13 V for x = 0.25 against an effective valence offset of 0.17 eV, with the well holding 70x the cap charge.
+- **HBT total dose** (`simws.radiation.hbt_rad.excess_base_current`, `dose_response`): interface traps over
+  the emitter-base periphery as surface recombination (s = sigma v_th N_it) plus the oxide charge there. The
+  excess base current equals the surface recombination integral to 3e-4, is linear in N_it, has ideality
+  about 1.5 (neutral-base and depletion parts); I_C does not change. The dose mapping uses the MOS
+  gate-oxide TID parameters (no ELDRS, no annealing): calibrate before quoting gain after dose.
+- **HBT ion strike** (`strike`): planar 2D track through the emitter, collector at 2 V. Charge is conserved
+  to 1e-5 and linear in LET at low LET (83 % collected in 2 ns). From about 3 MeV cm2/mg the track
+  shorts emitter to collector and the collected charge exceeds the deposited charge (ion-shunt effect). The
+  planar track exaggerates this. No substrate junction is modelled.
+- Rules: `sige_checks` (in `all`) and `sige_devices` (in `studies`); figures `fig_sige_gummel`,
+  `fig_sige_buried_channel`, `fig_hbt_tid`, `fig_hbt_strike`.
+
 ## Single-event upset example
 
 ```python

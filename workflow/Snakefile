@@ -46,6 +46,7 @@ rule all:
         f"{RES}/calibration/selftest.json",
         f"{RES}/mos/summary.json",
         f"{RES}/sic/sic_checks.json",
+        f"{RES}/sige/sige_checks.json",
 
 # Heavier studies, run on demand or by the nightly job:  snakemake --cores 12 studies
 rule studies:
@@ -57,11 +58,12 @@ rule studies:
         f"{RES}/geant4_events/seu_summary.json",
         f"{RES}/ser/summary.json",
         f"{RES}/mos_variability/summary.json",
+        f"{RES}/sige/devices.json",
 
 
 rule materials_table:
     input: "simws/materials/data/silicon.yaml", "simws/materials/data/sic_4h.yaml",
-           "simws/materials/data/gaas.yaml", "simws/materials/data/sio2.yaml"
+           "simws/materials/data/gaas.yaml", "simws/materials/data/sio2.yaml", "simws/materials/data/sige.yaml"
     output: f"{RES}/materials/parameters.md"
     params: py=py("tcad")
     log: "logs/materials_table.log"
@@ -251,6 +253,30 @@ rule sic_checks:
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/sic"
     log: "logs/sic_checks.log"
     shell: "{params.env} {params.py} workflow/scripts/sic_checks.py --outdir {params.out} > {log} 2>&1"
+
+
+SIGE_SRC = ["simws/materials/data/sige.yaml", "simws/tcad/physics.py", "simws/tcad/hbt.py", "simws/tcad/mos.py",
+            "simws/radiation/hbt_rad.py", "simws/radiation/tid.py", "workflow/scripts/sige.py"]
+
+
+rule sige_checks:
+    input: SIGE_SRC + ["simws/validation/sige_checks.py"]
+    output: f"{RES}/sige/sige_checks.json"
+    threads: 1
+    resources: mem_mb=800
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/sige"
+    log: "logs/sige_checks.log"
+    shell: "{params.env} {params.py} workflow/scripts/sige.py --what checks --outdir {params.out} > {log} 2>&1"
+
+
+rule sige_devices:
+    input: SIGE_SRC + ["simws/studies/sige_devices.py"]
+    output: f"{RES}/sige/devices.json"
+    threads: SWEEP_WORKERS
+    resources: mem_mb=lambda wc, threads: 500 * threads
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/sige"
+    log: "logs/sige_devices.log"
+    shell: "{params.env} {params.py} workflow/scripts/sige.py --what devices --outdir {params.out} --workers {threads} > {log} 2>&1"
 
 
 rule paper:

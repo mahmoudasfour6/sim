@@ -45,6 +45,8 @@ class Physics:
     mu_n: Optional[float] = None         # constant mobilities override the Masetti model (cm^2/Vs)
     mu_p: Optional[float] = None
     trap_level_eV: float = 0.0           # SRH trap energy relative to the intrinsic level, E_t - E_i (deep-level traps)
+    ge: Optional[str] = None             # Ge fraction x of Si(1-x)Ge(x) as a node expression (e.g. a graded HBT base)
+    ge_mode: str = "strained"            # "strained" (pseudomorphic on Si) or "relaxed" (bulk alloy)
     extra: Dict[str, float] = field(default_factory=dict)
 
 
@@ -55,6 +57,40 @@ def EnsureEdgeFromNodeModelExists(device, region, nodemodel):
     have = get_edge_model_list(device=device, region=region)
     if f"{nodemodel}@n0" not in have or f"{nodemodel}@n1" not in have:
         edge_from_node_model(device=device, region=region, node_model=nodemodel)
+
+
+def _sige_band_terms(device, region, phys):
+    """Node-expression strings (eV) for the SiGe conduction and valence band shifts, incl. DOS-ratio terms."""
+    if not phys.ge:
+        return "0", "0"
+    from devsim.python_packages.model_create import CreateNodeModel
+    from simws.materials import load
+    sg = load("sige")
+    CreateNodeModel(device, region, "GeX", f"max({phys.ge}, 0)")
+    if phys.ge_mode == "strained":
+        k = sg.get("strained_dEg_per_x", "eV")
+        dEc = f"({sg.get('strained_dEc_max', 'eV')}*GeX)"
+        dEg = f"({k}*GeX)"
+        # DOS: Nc ratio 2/3 and Nc*Nv ratio exp(-sqrt(k x)) above 1 % Ge, blended linearly from Si below it
+        w = "min(GeX/0.01, 1)"
+        ncr = f"(1 + ({sg.get('dos_Nc_ratio', 'dimensionless')} - 1)*{w})"
+        gam = f"(1 + (exp(-pow({sg.get('dos_gamma_k', 'dimensionless')}*max(GeX, 0.01), 0.5)) - 1)*{w})"
+        nvr = f"({gam}/{ncr})"
+        return f"({dEc} + V_t*log({ncr}))", f"(({dEg} - {dEc}) + V_t*log({nvr}))"
+    a, b, c = (sg.get(k, "eV") for k in ("relaxed_Eg_a", "relaxed_Eg_b", "relaxed_Eg_c"))
+    va, vb = sg.get("relaxed_dEv_a", "eV"), sg.get("relaxed_dEv_b", "eV")
+    dEg = f"(-({b})*GeX - ({c})*GeX^2)"
+    dEv = f"(({va} + ({vb})*GeX)*GeX)"
+    return f"({dEg} - {dEv})", dEv
+
+
+def _permittivity_expr(mat, phys):
+    eps_si = mat.get("eps_r", "dimensionless")
+    if not phys.ge:
+        return f"{eps_si * EPS0_F_PER_CM}"
+    from simws.materials import load
+    eps_ge = load("sige").get("eps_Ge", "dimensionless")
+    return f"({eps_si} + {eps_ge - eps_si}*GeX)*{EPS0_F_PER_CM}"
 
 
 def intrinsic_density(mat, T):
@@ -136,18 +172,28 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
         CreateNodeModel(device, region, "DeltaEg", f"{E0}*(log(Ntot/{Nr}) + pow(log(Ntot/{Nr})^2 + {C}, 0.5))")
     else:
         CreateNodeModel(device, region, "DeltaEg", "0")
-    CreateNodeModel(device, region, "n_ie", "n_i*exp(DeltaEg/(2*V_t))")
+    # band-edge shifts relative to the silicon reference (eV, positive = conduction band down / valence band up):
+    # half of the doping BGN on each band, plus SiGe heterojunction offsets and density-of-states ratios
+    # (simws.materials sige.yaml). Without Ge both reduce to 0.5*DeltaEg, i.e. the silicon model unchanged.
+    dEc_ge, dEv_ge = _sige_band_terms(device, region, phys)
+    CreateNodeModel(device, region, "dEc", f"0.5*DeltaEg + {dEc_ge}")
+    CreateNodeModel(device, region, "dEv", f"0.5*DeltaEg + {dEv_ge}")
+    CreateNodeModel(device, region, "n_ie", "n_i*exp((dEc + dEv)/(2*V_t))")
+    eps_expr = _permittivity_expr(mat, phys)
+    CreateNodeModel(device, region, "Eps", eps_expr)
 
     # potential-only start: n = n_i exp((psi + dEg/2)/Vt), p = n_i exp(-(psi - dEg/2)/Vt)
     CreateSolution(device, region, "Potential")
-    for name, expr in (("IntrinsicElectrons", "n_i*exp((Potential + 0.5*DeltaEg)/V_t)"),
-                       ("IntrinsicHoles", "n_i*exp(-(Potential - 0.5*DeltaEg)/V_t)"),
+    for name, expr in (("IntrinsicElectrons", "n_i*exp((Potential + dEc)/V_t)"),
+                       ("IntrinsicHoles", "n_i*exp(-(Potential - dEv)/V_t)"),
                        ("PotentialIntrinsicCharge", "-ElectronCharge*(kahan3(IntrinsicHoles, -IntrinsicElectrons, NetDoping)"
                         + (f" + {extra_charge('IntrinsicElectrons')}" if extra_charge else "") + ")")):
         CreateNodeModel(device, region, name, expr)
         CreateNodeModelDerivative(device, region, name, expr, "Potential")
+    EnsureEdgeFromNodeModelExists(device, region, "Eps")
+    CreateEdgeModel(device, region, "EpsEdge", "0.5*(Eps@n0 + Eps@n1)")
     for name, expr in (("ElectricField", "(Potential@n0 - Potential@n1)*EdgeInverseLength"),
-                       ("PotentialEdgeFlux", "Permittivity*ElectricField")):
+                       ("PotentialEdgeFlux", "EpsEdge*ElectricField")):
         CreateEdgeModel(device, region, name, expr)
         CreateEdgeModelDerivatives(device, region, name, expr, "Potential")
     equation(device=device, region=region, name="PotentialEquation", variable_name="Potential",
@@ -171,17 +217,27 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     CreateSolution(device, region, "Electrons"); CreateSolution(device, region, "Holes")
     set_node_values(device=device, region=region, name="Electrons", init_from="IntrinsicElectrons")
     set_node_values(device=device, region=region, name="Holes", init_from="IntrinsicHoles")
-    for v in ("Potential", "Electrons", "Holes", "DeltaEg"):
+    for v in ("Potential", "Electrons", "Holes", "dEc", "dEv"):
         EnsureEdgeFromNodeModelExists(device, region, v)
 
     # mobility: Masetti per node -> edge average; optional velocity saturation on top
     if phys.doping_mobility and phys.mu_n is None:
-        CreateNodeModel(device, region, "mu_n_node", _masetti_expr(mat, T, "n"))
-        CreateNodeModel(device, region, "mu_p_node", _masetti_expr(mat, T, "p"))
+        for c in ("n", "p"):
+            CreateNodeModel(device, region, f"mu_{c}_node", _masetti_expr(mat, T, c))
+            CreateNodeModel(device, region, f"mu_{c}_node_si", _masetti_expr(mat, T, c))
     else:
         zn, zp = mat.get("mu_n_T_exponent", "dimensionless"), mat.get("mu_p_T_exponent", "dimensionless")
-        CreateNodeModel(device, region, "mu_n_node", str(phys.mu_n or mat.get("mu_n", "cm**2/V/s") * (T / 300) ** -zn))
-        CreateNodeModel(device, region, "mu_p_node", str(phys.mu_p or mat.get("mu_p", "cm**2/V/s") * (T / 300) ** -zp))
+        for c, val in (("n", phys.mu_n or mat.get("mu_n", "cm**2/V/s") * (T / 300) ** -zn),
+                       ("p", phys.mu_p or mat.get("mu_p", "cm**2/V/s") * (T / 300) ** -zp)):
+            CreateNodeModel(device, region, f"mu_{c}_node", str(val))
+            CreateNodeModel(device, region, f"mu_{c}_node_si", str(val))
+    if phys.ge:
+        from simws.materials import load as _load
+        sg = _load("sige")
+        for c in ("n", "p"):
+            f = sg.get(f"mu_{c}_factor", "dimensionless")
+            if f != 1.0:
+                CreateNodeModel(device, region, f"mu_{c}_node", f"mu_{c}_node_si*(1 + {f - 1}*min(GeX/0.01, 1))")
     for c in ("n", "p"):
         EnsureEdgeFromNodeModelExists(device, region, f"mu_{c}_node")
         CreateEdgeModel(device, region, f"mu_{c}_lf", f"0.5*(mu_{c}_node@n0 + mu_{c}_node@n1)")
@@ -195,9 +251,9 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     # Scharfetter-Gummel currents on the band-edge (BGN-shifted) potentials. vdiff and B(vdiff) are separate edge
     # models with hand-written derivatives (as DEVSIM's simple_dd does): inlining them makes DEVSIM's symbolic
     # differentiation take ~30 s per device.
-    for c, sgn in (("n", "+"), ("p", "-")):
+    for c, sgn, band in (("n", "+", "dEc"), ("p", "-", "dEv")):
         vd = f"vdiff_{c}"
-        CreateEdgeModel(device, region, vd, f"(Potential@n0 - Potential@n1 {sgn} 0.5*(DeltaEg@n0 - DeltaEg@n1))/V_t")
+        CreateEdgeModel(device, region, vd, f"(Potential@n0 - Potential@n1 {sgn} ({band}@n0 - {band}@n1))/V_t")
         CreateEdgeModel(device, region, f"{vd}:Potential@n0", "1/V_t")
         CreateEdgeModel(device, region, f"{vd}:Potential@n1", "-1/V_t")
         CreateEdgeModel(device, region, f"Bern_{c}", f"B({vd})")
@@ -286,11 +342,11 @@ def _potential_contact(device, region, contact, is_circuit):
     from devsim.python_packages.model_create import (CreateContactNodeModel, CreateEdgeModel,
                                                       CreateEdgeModelDerivatives, InEdgeModelList)
     if not InEdgeModelList(device, region, "contactcharge_edge"):
-        CreateEdgeModel(device, region, "contactcharge_edge", "Permittivity*ElectricField")
-        CreateEdgeModelDerivatives(device, region, "contactcharge_edge", "Permittivity*ElectricField", "Potential")
+        CreateEdgeModel(device, region, "contactcharge_edge", "EpsEdge*ElectricField")
+        CreateEdgeModelDerivatives(device, region, "contactcharge_edge", "EpsEdge*ElectricField", "Potential")
     b = _bias(contact)
     # psi = bias + Vt ln(n0/n_i) - dEg/2  (equivalently bias - Vt ln(p0/n_i) + dEg/2, since n0 p0 = n_ie^2)
-    expr = f"Potential - {b} - V_t*log({_N0}/n_i) + 0.5*DeltaEg"
+    expr = f"Potential - {b} - V_t*log({_N0}/n_i) + dEc"
     name = f"{contact}nodemodel"
     CreateContactNodeModel(device, contact, name, expr)
     CreateContactNodeModel(device, contact, f"{name}:Potential", "1")

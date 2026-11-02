@@ -41,6 +41,10 @@ class MOSCase:
     oxide: List[Tuple[float, float]] = field(default_factory=list)   # (nm from Si interface, cm^-2)
     D_it: float = 0.0                     # cm^-2 eV^-1
     physics: Physics = field(default_factory=lambda: Physics(srh=False, auger=False))
+    # buried SiGe channel: Si cap of `cap_nm`, then `well_nm` of Si(1-x)Ge(x) strained on Si (0 = no SiGe)
+    cap_nm: float = 0.0
+    well_nm: float = 0.0
+    ge_x: float = 0.0
 
 
 def build(case: MOSCase, material=None, oxide_material=None):
@@ -60,6 +64,9 @@ def build(case: MOSCase, material=None, oxide_material=None):
     create_1d_mesh(mesh="m")
     add_1d_mesh_line(mesh="m", pos=-tox, ps=tox / 40, tag="G")
     add_1d_mesh_line(mesh="m", pos=0.0, ps=0.05 * NM, tag="I")
+    if case.ge_x > 0 and case.well_nm > 0:
+        for pos in (case.cap_nm, case.cap_nm + case.well_nm):
+            add_1d_mesh_line(mesh="m", pos=pos * NM, ps=0.1 * NM)
     add_1d_mesh_line(mesh="m", pos=L, ps=L / 50, tag="B")
     add_1d_region(mesh="m", material="SiO2", region="ox", tag1="G", tag2="I")
     add_1d_region(mesh="m", material="Si", region="si", tag1="I", tag2="B")
@@ -113,7 +120,12 @@ def build(case: MOSCase, material=None, oxide_material=None):
 
     # no DC current flows in a MOS capacitor, so the Fermi level is flat: equilibrium (Poisson-Boltzmann) carriers
     # are exact for quasi-static C-V and avoid the ill-conditioned continuity equations in inversion
-    used = setup_region("d", "si", mat, net, tot, case.physics, {"sub": False}, extra_charge=extra, pre_solve=pre,
+    phys = case.physics
+    if case.ge_x > 0 and case.well_nm > 0:
+        import dataclasses as _dc
+        a, b = case.cap_nm * NM, (case.cap_nm + case.well_nm) * NM
+        phys = _dc.replace(phys, ge=f"{case.ge_x}*step(x - {a})*step({b} - x)", ge_mode="strained")
+    used = setup_region("d", "si", mat, net, tot, phys, {"sub": False}, extra_charge=extra, pre_solve=pre,
                         carriers=False)
     return used
 
@@ -204,3 +216,23 @@ def gate_voltage_at_surface_potential(case: MOSCase, psi_targets, V_lo=-4.0, V_h
     psi = np.array(psi)
     from scipy.interpolate import PchipInterpolator
     return PchipInterpolator(psi, V)(np.asarray(psi_targets, float))
+
+
+
+def hole_sheets(case: MOSCase, V, material=None):
+    """Hole sheet densities (cm^-2) in the Si cap, the SiGe well and the substrate vs gate voltage (buried channel)."""
+    from devsim import get_node_model_values
+    from simws.tcad.solve import ramp_bias
+    build(case, material)
+    out = {"V": [], "cap": [], "well": [], "sub": []}
+    a, b = case.cap_nm * NM, (case.cap_nm + case.well_nm) * NM
+    for v in V:
+        ramp_bias("d", "gate", v, step=0.1, absolute_error=1.0, relative_error=1e-12, maximum_iterations=60)
+        x = np.array(get_node_model_values(device="d", region="si", name="x"))
+        p = np.array(get_node_model_values(device="d", region="si", name="IntrinsicHoles"))
+        vol = np.array(get_node_model_values(device="d", region="si", name="NodeVolume"))
+        out["V"].append(v)
+        out["cap"].append(float(np.sum((p * vol)[x < a])))
+        out["well"].append(float(np.sum((p * vol)[(x >= a) & (x <= b)])))
+        out["sub"].append(float(np.sum((p * vol)[(x > b) & (x < b + 50 * NM)])))
+    return {k: np.array(v) for k, v in out.items()}

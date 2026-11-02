@@ -1,0 +1,22 @@
+# Si(1-x)Ge(x) alloy: composition laws used by simws.materials.sige to build band offsets relative to silicon.
+# Coefficients, not a fixed composition: x is set per device (a constant or a profile, e.g. a graded HBT base).
+# "strained" = pseudomorphic on Si(001) (HBT base, buried pMOS channel); "relaxed" = bulk alloy.
+name: sige
+reference_temperature: {value: 300, unit: K}
+parameters:
+  # --- strained SiGe on Si(001)
+  strained_dEg_per_x:   {value: 0.75,  unit: eV, ref: "band-gap reduction 7.5 meV per % Ge; Zareba et al., Solid-State Electron. (2001), as used in J. Telecom. Inf. Technol. 3/2007 (Eq. 2)", status: verified}
+  strained_dEc_max:     {value: 0.0,   unit: eV, ref: "conduction-band offset 0 < dEc < 40 meV for x < 0.8 (Penn et al. 1999, via Ioffe NSM); taken as 0: the gap change sits in the valence band", status: provisional}
+  dos_gamma_k:          {value: 5.0,   unit: dimensionless, ref: "(NcNv)_SiGe/(NcNv)_Si = exp(-sqrt(k x)), x >= 0.01; Zareba et al. (2001), as above (Eq. 3)", status: verified}
+  dos_Nc_ratio:         {value: 0.6667, unit: dimensionless, ref: "Nc_SiGe = (2/3) Nc_Si (strain-split conduction valleys); Sokolic & Amon, ESSDERC 1996, as above", status: verified}
+  # --- relaxed (bulk) SiGe, x < 0.85
+  relaxed_Eg_a:         {value: 1.12,  unit: eV, ref: "Eg = a + b x + c x^2, Delta-minimum, x < 0.85, 300 K; Ioffe NSM SiGe band structure", status: verified}
+  relaxed_Eg_b:         {value: -0.41, unit: eV, ref: "as above", status: verified}
+  relaxed_Eg_c:         {value: 0.008, unit: eV, ref: "as above", status: verified}
+  relaxed_dEv_a:        {value: 0.47,  unit: eV, ref: "chemical valence offset dEv = (a + b x) x on Si; Rieger & Vogl, PRB 48, 14276 (1993), via Ioffe NSM", status: verified}
+  relaxed_dEv_b:        {value: -0.06, unit: eV, ref: "as above", status: verified}
+  # --- other properties
+  eps_Ge:               {value: 16.2,  unit: dimensionless, ref: "Ge static permittivity, Sze & Ng (2007); SiGe by linear interpolation from Si", status: provisional}
+  mu_n_factor:          {value: 1.0,   unit: dimensionless, ref: "electron mobility ratio SiGe/Si in the base (alloy scattering vs strain); Decoutere et al. 1995 give D_n,rel(x): calibrate", status: provisional}
+  mu_p_factor:          {value: 1.0,   unit: dimensionless, ref: "hole mobility ratio SiGe/Si (strain enhancement in-plane, alloy scattering): calibrate", status: provisional}
+profiles: {}

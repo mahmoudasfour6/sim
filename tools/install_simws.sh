@@ -32,7 +32,9 @@ grep -q "test_simws_unit_suite_in_tcad_env" tests/test_slow_solvers.py || cat te
 grep -q "test_simws_axisymmetric_seu" tests/test_slow_solvers.py || cat tests/slow_simws_v3_addition.py >> tests/test_slow_solvers.py
 grep -q "test_simws_geant4_event_seu" tests/test_slow_solvers.py || cat tests/slow_simws_v4_addition.py >> tests/test_slow_solvers.py
 grep -q "test_simws_mos_and_tid" tests/test_slow_solvers.py || cat tests/slow_simws_v5_addition.py >> tests/test_slow_solvers.py
-rm -f tests/slow_simws_addition.py tests/slow_simws_v3_addition.py tests/slow_simws_v4_addition.py tests/slow_simws_v5_addition.py
+grep -q "test_simws_sige_checks" tests/test_slow_solvers.py || cat tests/slow_simws_v6_addition.py >> tests/test_slow_solvers.py
+rm -f tests/slow_simws_addition.py tests/slow_simws_v3_addition.py tests/slow_simws_v4_addition.py tests/slow_simws_v5_addition.py \
+      tests/slow_simws_v6_addition.py
 # unit tests need the tcad env: keep the workflow-env runs from collecting (and skipping) them; the slow tier
 # runs them in tcad with the ini options overridden
 grep -q -- "--ignore=tests/unit" pytest.ini || sed -i 's|^addopts = \(.*\)$|addopts = \1 --ignore=tests/unit|' pytest.ini
@@ -73,8 +75,9 @@ for env in tcad quantum_iii_v process_rad; do
 done
 mkdir -p notes && [ -f notes/README.md ] || $E/workflow/bin/python tools/study.py index
 git add -A simws config workflow pyproject.toml tests pipeline tools docs notes pytest.ini .gitignore envs/tcad.* envs/quantum_iii_v.* envs/process_rad.*
-git commit -q -m "simws 0.5: MOS capacitor with oxide/interface charge and interface traps, total-ionizing-dose buildup, SRH trap levels, polynomial-chaos process-variation surrogates, 4H-SiC models (incomplete ionization, anisotropic mobility and impact ionization)" \
-  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -q -m "simws 0.6: SiGe - strained/relaxed SiGe band offsets and DOS, SiGe HBT (Gummel, gain, Early voltage) validated against Moll-Ross, buried strained-SiGe pMOS channel, HBT total-dose excess base current and ion-strike collected charge" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Gc1UGcUaEy5777LUU4pPwj"
 git push -q && git log --oneline -1
 git remote | grep -qx offsite && git push -q offsite --all && echo "  pushed to offsite" || echo "  (no off-site remote yet: see tools/setup_offsite_backup.sh)"
 WINUSER=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')

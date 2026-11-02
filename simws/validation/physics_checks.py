@@ -124,7 +124,7 @@ def intrinsic_vs_measured(mat=None):
 def run_all():
     res = {"equilibrium_bgn": equilibrium_bgn(), "mobility_resistors": mobility_resistors(),
            "lifetime_bars": lifetime_bars(), "intrinsic_vs_measured": intrinsic_vs_measured(),
-           "trap_level_generation": trap_level_generation()}
+           "trap_level_generation": trap_level_generation(), "equilibrium_sige": equilibrium_sige()}
     res["pass"] = all(v["pass"] for v in res.values())
     return res
 
@@ -169,3 +169,22 @@ def trap_level_generation(mat=None):
     return {"midgap": out[0.0], "Et_0.1eV": out[0.1], "generation_ratio": ratio, "cosh_rule_ratio": expected,
             "terminal_vs_generation_worst": cons, "implementation_worst_rel": impl,
             "pass": bool(impl < 1e-10 and cons < 0.05 and abs(ratio / expected - 1) < 0.2)}
+
+
+def equilibrium_sige(mat=None):
+    """Zero-bias n+/p junction whose p side has a graded strained-SiGe layer (0 -> 25 % Ge): the heterojunction
+    band offsets and DOS ratios must leave no terminal current and n p = n_ie^2 (with the SiGe n_ie) everywhere."""
+    from devsim import get_node_model_values
+    mat = mat or load("silicon")
+    L = 1e-4
+    _mesh(L, [(0, 1e-7, "L"), (0.2e-4, 2e-8, None), (0.5e-4, 2e-8, None), (L, 5e-7, "R")])
+    nd = "1e20*exp(-pow(x/0.1e-4, 2))"
+    ge = "0.25*step(x - 0.2e-4)*step(0.5e-4 - x)*(x - 0.2e-4)/0.3e-4"
+    setup_region("d", "si", mat, f"{nd} - 5e18", f"{nd} + 5e18", Physics(ge=ge), {"left": False, "right": False})
+    g = lambda k: np.array(get_node_model_values(device="d", region="si", name=k))
+    n, p, nie, dEv = g("Electrons"), g("Holes"), g("n_ie"), g("dEv")
+    I = abs(contact_current("d", "left"))
+    scale = Q_E * 100.0 * 0.02585 * 1e20 / 2e-8
+    return {"current_over_scale": I / scale, "np_over_nie2_worst_rel_dev": float(np.max(np.abs(n * p / nie ** 2 - 1))),
+            "dEv_max_meV": float(dEv.max() * 1e3),
+            "pass": bool(I / scale < 1e-12 and np.max(np.abs(n * p / nie ** 2 - 1)) < 1e-6)}

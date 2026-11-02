@@ -221,6 +221,24 @@
     "rtol": 1e-06,
     "value": 177.5120331405834
   },
+  "simws.sige.IC_ratio_0.6V": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 6.011728639488694
+  },
+  "simws.sige.buried_shift_V": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 0.12528172615666677
+  },
+  "simws.sige.strike_QC_let0.1_fC": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 1.2884773370078895
+  },
   "simws.tid.tox20.dVmg_1Mrad_V": {
     "atol": 0.0,
     "recorded": "2026-11-02",
