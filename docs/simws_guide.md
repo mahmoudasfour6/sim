@@ -143,6 +143,38 @@ $W/snakemake paper --cores 12 --resources mem_mb=20000     # everything + figure
 - Rules: `sige_checks` (in `all`) and `sige_devices` (in `studies`); figures `fig_sige_gummel`,
   `fig_sige_buried_channel`, `fig_hbt_tid`, `fig_hbt_strike`.
 
+## simws 0.7: material parameters from first principles
+
+- **Quantum ESPRESSO driver** (`simws.dft.qe`): writes pw.x inputs (scf, bands, relax, spin-orbit, hybrids),
+  runs them (MPI as the qe_si_scf rule), reads the XML. Equation of state with a SciPy-free Birch-Murnaghan fit.
+- **Band edges** (`simws.dft.bandedge`): conduction minimum and m_l, m_t; heavy/light/split-off hole masses
+  with spin-orbit along [100], [110], [111] and their DOS averages; Delta_so; N_c(T) and N_v(T) summed directly
+  over DFT band energies, so non-parabolicity is kept (checked against parabolic bands to 1 %); HSE06 gap as
+  a scissor on PBE (EXX q-mesh = k-mesh; a coarser q-mesh over-corrects by 0.4 eV).
+- **Elastic constants and deformation potentials** (`simws.dft.strain`): C11, C12, C44 (Kleinman relaxed) at
+  the DFT lattice constant, checked against the equation-of-state bulk modulus; Xi_u and b (spin-orbit).
+- **Ensemble and uncertainty** (`simws.studies.dft_params`, rule `dft_params` in `studies`): LDA, PBE and
+  PBEsol; value = mean, sigma = functional spread combined with convergence variants. Written as the computed
+  material profile `results/dft/silicon.dft.yaml`: `load("silicon", profile="dft", computed_dir="results/dft")`;
+  after review, `python tools/promote_computed.py results/dft/silicon.dft.yaml --yes` puts it in the git-tracked
+  database. Device code uses it through `intrinsic_density` (DFT N_c(T), N_v(T) with the measured gap).
+  The base literature set is never changed.
+- **Checks** (`results/dft/checks.json`): every value against its measurement with tolerances fixed in
+  advance (`simws.validation.dft_checks`). Reference run: m_l +3.9 %, m_t +0.5 %, hole masses -1 to -9 %,
+  Delta_so 48 vs 44 meV, C_ij 7-9 % soft, Xi_u 8.9 eV, b -2.32 eV, HSE gap 1.165 eV (1.170 measured; its sigma
+  covers only the scissor spread: add a 6x6x6 grid for convergence), n_i(T) 8 % below the measured fit with the
+  right temperature slope (the T^1.5 model drifts by 11 % between 250 and 400 K).
+- **Pseudopotentials**: the validated norm-conserving set ships in `simws/dft/pseudo` (QE distribution, GPL-2).
+  Use your own through `dft.pseudo_dir` / `dft.pseudos` in config.yaml, then re-check.
+- **CHGNet benchmark** (`simws.dft.mlip`): SiGe alloy lattice constants (random 64-atom cells) and elastic
+  constants against DFT and experiment. Result here: too soft (Si C_ij 20-40 % low, Ge unusable) and the wrong
+  sign of the SiGe bowing, so nothing from CHGNet enters the database. Re-run after fine-tuning.
+- **SiGe critical thickness**: Matthews-Blakeslee and People-Bean with the measured a(x) (Dismukes) and elastic
+  constants. The 0.6 HBT base (0-15 % graded, 50 nm) is just past equilibrium (metastable, as production bases
+  are), and the buried pMOS well (25 %, 10 nm) sits at the equilibrium limit (t/h_MB = 0.99).
+- Not covered yet: Ge band edges (PBE closes the Ge gap; needs a hybrid or GW start), SiGe alloy band offsets
+  from supercells, defect levels.
+
 ## Single-event upset example
 
 ```python

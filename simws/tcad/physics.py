@@ -93,12 +93,7 @@ def _permittivity_expr(mat, phys):
     return f"({eps_si} + {eps_ge - eps_si}*GeX)*{EPS0_F_PER_CM}"
 
 
-def intrinsic_density(mat, T):
-    """n_i(T) from n_i(300 K), Varshni Eg(T) and Nc Nv ~ T^3."""
-    ni = mat.get("n_i", "cm**-3")
-    Eg0, a, b = mat.get("varshni_Eg0", "eV"), mat.get("varshni_alpha", "eV/K"), mat.get("varshni_beta", "K")
-    Eg = lambda t: Eg0 - a * t * t / (t + b)
-    return ni * (T / 300.0) ** 1.5 * math.exp(Eg(300.0) / (2 * K_B_EV * 300.0) - Eg(T) / (2 * K_B_EV * T))
+from simws.materials.semiconductor import intrinsic_density  # noqa: E402,F401  (moved; DEVSIM-free)
 
 
 def saturation_velocity(mat, T):

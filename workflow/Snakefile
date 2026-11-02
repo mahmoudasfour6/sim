@@ -59,6 +59,7 @@ rule studies:
         f"{RES}/ser/summary.json",
         f"{RES}/mos_variability/summary.json",
         f"{RES}/sige/devices.json",
+        f"{RES}/dft/checks.json",
 
 
 rule materials_table:
@@ -277,6 +278,20 @@ rule sige_devices:
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/sige"
     log: "logs/sige_devices.log"
     shell: "{params.env} {params.py} workflow/scripts/sige.py --what devices --outdir {params.out} --workers {threads} > {log} 2>&1"
+
+
+DFT_ENV = config.get("dft", {}).get("env", "materials")
+
+
+rule dft_params:
+    input: "simws/dft/qe.py", "simws/dft/bandedge.py", "simws/dft/strain.py", "simws/dft/mlip.py",
+           "simws/studies/dft_params.py", "simws/validation/dft_checks.py", "workflow/scripts/dft_params.py"
+    output: f"{RES}/dft/params.json", f"{RES}/dft/checks.json", f"{RES}/dft/silicon.dft.yaml"
+    threads: QE_RANKS
+    resources: mem_mb=3000
+    params: py=py(DFT_ENV), env=threads_env(1), out=f"{RES}/dft"
+    log: "logs/dft_params.log"
+    shell: "{params.env} {params.py} workflow/scripts/dft_params.py --outdir {params.out} --ranks {threads} > {log} 2>&1"
 
 
 rule paper:

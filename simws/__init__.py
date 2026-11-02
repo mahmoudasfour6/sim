@@ -11,4 +11,4 @@ tcad        DEVSIM adapters and validated device simulations
 quantum     validated quantum-confinement solvers
 coupling    in-process multiphysics coupling (electro-thermal)
 """
-__version__ = "0.6.0"
+__version__ = "0.7.0"

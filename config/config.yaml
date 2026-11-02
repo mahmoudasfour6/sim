@@ -22,3 +22,11 @@ ser_flux_unit: "1/cm2/s/sr"  # e.g. "1/m2/s/sr" for CREME96
 event_ions: "17:35:300,36:84:1000"   # Z:A:E_MeV for the Geant4 event study
 event_count: 20              # Geant4 events per ion
 event_seu_count: 12          # events per ion that each get a DEVSIM run
+
+# --- first-principles parameters (simws 0.7): rule dft_params (in `studies`)
+dft:
+  env: materials             # conda env with pw.x (Quantum ESPRESSO); CHGNet benchmark runs if chgnet imports there
+  pseudo_dir: ""             # empty = the validated set shipped in simws/dft/pseudo; else a directory plus:
+  pseudos: {}                #   Si_pbe, Si_pbe_fr (fully relativistic, for spin-orbit), Si_lda
+  ecutwfc: 40.0
+  hse_kgrids: [[4, 4, 4]]    # add [6, 6, 6] for the hybrid-gap convergence check (about 20x slower)

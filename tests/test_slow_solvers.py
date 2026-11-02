@@ -360,3 +360,20 @@ def test_simws_sige_checks(tmp_path, golden):
     golden.verify({"simws.sige.IC_ratio_0.6V": r["collector_enhancement"]["cases"]["VBE_0.6"]["Jn_ratio_devsim"],
                    "simws.sige.buried_shift_V": r["buried_channel"]["shift_V"],
                    "simws.sige.strike_QC_let0.1_fC": r["strike_conservation"]["Q_C_fC"][0]})
+
+
+# --------------------------------------------------------------------------- simws 0.7 (first-principles parameters)
+def test_simws_dft_params_quick(tmp_path, golden):
+    """PBE-only pass of the DFT parameter study (no convergence variants, no CHGNet): runs Quantum ESPRESSO."""
+    import yaml as _y
+    env = _y.safe_load((REPO / "config" / "config.yaml").read_text()).get("dft", {}).get("env", "materials")
+    run_in_env(env, [env_python(env), REPO / "workflow" / "scripts" / "dft_params.py", "--outdir", tmp_path, "--quick",
+                     "--ranks", "4"], REPO, timeout=3600, threads=1, extra_env=_simws_env())
+    p = json.loads((tmp_path / "params.json").read_text())["results"]["parameters"]
+    c = json.loads((tmp_path / "checks.json").read_text())["results"]
+    # PBE alone (quick mode) is known to be soft: the C_ij tolerances apply to the ensemble mean (full rule)
+    soft = {"C11", "C12", "C44"}
+    assert all(v["pass"] for k, v in c["parameters"].items() if k not in soft), c["parameters"]
+    assert c["intrinsic"]["pass"] and c["gap"]["pass"] and c["elastic_consistency"]["pass"], c
+    golden.verify({"simws.dft.PBE.m_l": p["m_l"]["value"], "simws.dft.PBE.m_t": p["m_t"]["value"],
+                   "simws.dft.PBE.Nc_300": p["Nc_300"]["value"], "simws.dft.PBE.Nv_300": p["Nv_300"]["value"]})

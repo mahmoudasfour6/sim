@@ -404,6 +404,69 @@ def fig_hbt_strike(F, plt):
     plt.close(fig)
 
 
+def fig_dft_vs_measured(F, plt):
+    c = F.j("dft/checks.json")["results"]["parameters"]
+    label = {"m_l": "m_l", "m_t": "m_t", "m_hh_100": "m_hh [100]", "m_hh_111": "m_hh [111]", "m_lh_100": "m_lh [100]",
+             "m_lh_111": "m_lh [111]", "m_so_100": "m_so", "Delta_so": "Δ_so", "C11": "C11", "C12": "C12", "C44": "C44"}
+    keys = [k for k in label if k in c]
+    fig, ax = plt.subplots(figsize=(3.6, 0.28 * len(keys) + 0.8))
+    y = np.arange(len(keys))[::-1]
+    r = np.array([c[k]["dft"] / c[k]["measured"] for k in keys])
+    e = np.array([c[k]["sigma"] / c[k]["measured"] for k in keys])
+    tol = np.array([c[k]["tol"] for k in keys])
+    for yi, t in zip(y, tol):
+        ax.plot([1 - t, 1 + t], [yi, yi], color=GRID, lw=6, solid_capstyle="butt", zorder=0)
+    ax.errorbar(r, y, xerr=e, fmt="o", ms=4, color=CAT[0], ecolor=CAT[0], elinewidth=1.2, capsize=0)
+    ax.axvline(1.0, color=INK2, lw=0.8)
+    ax.set_yticks(y); ax.set_yticklabels([label[k] for k in keys]); ax.grid(axis="y", visible=False)
+    ax.set_xlabel("DFT / measured (bar: ± tolerance)")
+    ax.set_title("Si band edges and elastic constants from DFT", loc="left")
+    F.save(fig, "fig_dft_vs_measured", {k: c[k] for k in keys}, ["dft/checks.json"])
+    plt.close(fig)
+
+
+def fig_dft_intrinsic(F, plt):
+    rows = F.j("dft/checks.json")["results"]["intrinsic"]["rows"]
+    p = F.j("dft/params.json")["results"]["parameters"]
+    T = np.array([r["T"] for r in rows])
+    dft = np.array([r["dft"] for r in rows]); base = np.array([r["base_model"] for r in rows])
+    mis = np.array([r["measured_fit"] for r in rows])
+    rel = 0.5 * np.hypot(p["Nc_300"]["sigma"] / p["Nc_300"]["value"], p["Nv_300"]["sigma"] / p["Nv_300"]["value"])
+    fig, ax = plt.subplots(figsize=(3.4, 2.5))
+    ax.fill_between(T, dft / mis * (1 - rel), dft / mis * (1 + rel), color=CAT[0], alpha=0.18, lw=0)
+    ax.plot(T, dft / mis, color=CAT[0], marker="o", ms=4, label="DFT N_c, N_v + measured E_g")
+    ax.plot(T, base / mis, color=CAT[1], marker="o", ms=4, linestyle=(0, (4, 2)), label="previous model (T^1.5)")
+    ax.axhline(1.0, color=INK2, lw=0.8)
+    ax.set_ylim(0.8, 1.2)
+    ax.set_xlabel("temperature (K)"); ax.set_ylabel("n_i / measured (Misiakos 1993)")
+    ax.set_title("Intrinsic density from first principles", loc="left")
+    ax.legend(loc="upper left", fontsize=7)
+    F.save(fig, "fig_dft_intrinsic", {"T": T, "ni_dft": dft, "ni_base": base, "ni_measured_fit": mis, "rel_sigma": rel},
+           ["dft/checks.json", "dft/params.json"])
+    plt.close(fig)
+
+
+def fig_sige_critical_thickness(F, plt):
+    ct = F.j("dft/params.json")["results"]["raw"]["critical_thickness"]
+    x = np.array(ct["x"])
+    fig, ax = plt.subplots(figsize=(3.4, 2.6))
+    ax.semilogy(x, ct["measured"]["h_MB_nm"], color=CAT[0], label="Matthews–Blakeslee (stable)")
+    ax.semilogy(x, ct["measured"]["h_PB_nm"], color=CAT[1], label="People–Bean (metastable)")
+    if "dft_Si_elastic" in ct:
+        ax.semilogy(x, ct["dft_Si_elastic"]["h_MB_nm"], color=CAT[0], linestyle=(0, (2, 2)), lw=1.0,
+                    label="MB with DFT C_ij for Si (overlaps)")
+    for name, mk in (("hbt_base", "s"), ("mos_buried_well", "D")):
+        d = ct["devices"][name]
+        ax.plot([d["x_eff"]], [d["thickness_nm"]], mk, ms=6, color=INK, zorder=5)
+        ax.annotate({"hbt_base": "HBT base", "mos_buried_well": "pMOS well"}[name] + f" ({d['state']})",
+                    (d["x_eff"], d["thickness_nm"]), textcoords="offset points", xytext=(6, 4), fontsize=7, color=INK2)
+    ax.set_xlabel("Ge fraction x"); ax.set_ylabel("critical thickness (nm)")
+    ax.set_title("SiGe on Si(001): strained-layer limits", loc="left")
+    ax.legend(loc="upper right", fontsize=7)
+    F.save(fig, "fig_sige_critical_thickness", ct, ["dft/params.json"])
+    plt.close(fig)
+
+
 def methods_table(F):
     """Every material parameter the simulations use, with value, unit, status and reference (Markdown + LaTeX)."""
     from simws.materials import available, load
@@ -448,6 +511,9 @@ def main():
     F.run("sige buried channel", lambda: fig_sige_buried_channel(F, plt))
     F.run("hbt tid", lambda: fig_hbt_tid(F, plt))
     F.run("hbt strike", lambda: fig_hbt_strike(F, plt))
+    F.run("dft vs measured", lambda: fig_dft_vs_measured(F, plt))
+    F.run("dft intrinsic", lambda: fig_dft_intrinsic(F, plt))
+    F.run("sige critical thickness", lambda: fig_sige_critical_thickness(F, plt))
     F.run("methods table", lambda: methods_table(F))
     (F.out / "INDEX.json").write_text(json.dumps({"made": F.made, "skipped": F.skipped}, indent=1))
     print(f"figures in {F.out}: {len(F.made)} made")
