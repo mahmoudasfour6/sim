@@ -43,6 +43,16 @@ def stamp(inputs=(), parameters=None, **extra) -> dict:
     }
 
 
+def _jsonable(o):
+    """numpy arrays and scalars, paths and anything else with a natural JSON form"""
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    try:
+        return float(o)
+    except (TypeError, ValueError):
+        return str(o)
+
+
 def write_json(path, data: dict, provenance: dict):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps({"results": data, "provenance": provenance}, indent=2, default=float) + "\n")
+    Path(path).write_text(json.dumps({"results": data, "provenance": provenance}, indent=2, default=_jsonable) + "\n")

@@ -44,6 +44,8 @@ rule all:
         f"{RES}/geant4_track/summary.json",
         f"{RES}/models/physics_checks.json",
         f"{RES}/calibration/selftest.json",
+        f"{RES}/mos/summary.json",
+        f"{RES}/sic/sic_checks.json",
 
 # Heavier studies, run on demand or by the nightly job:  snakemake --cores 12 studies
 rule studies:
@@ -54,6 +56,7 @@ rule studies:
         f"{RES}/axisymmetric/summary.json",
         f"{RES}/geant4_events/seu_summary.json",
         f"{RES}/ser/summary.json",
+        f"{RES}/mos_variability/summary.json",
 
 
 rule materials_table:
@@ -175,7 +178,7 @@ rule axisymmetric:
 
 
 rule calibration_selftest:
-    input: "simws/calibrate.py", "simws/tcad/physics.py"
+    input: "simws/calibrate.py", "simws/tcad/physics.py", "workflow/scripts/calibration_selftest.py"
     output: f"{RES}/calibration/selftest.json"
     threads: 1
     resources: mem_mb=600
@@ -219,6 +222,37 @@ rule ser:
 
 # Paper figures (PDF + PNG + data sidecars) and the methods/parameter table, from every result above:
 #   snakemake --cores 12 --resources mem_mb=20000 paper
+rule mos_tid:
+    input: "simws/tcad/mos.py", "simws/radiation/tid.py", "simws/validation/mos_checks.py", "simws/materials/data/sio2.yaml",
+           "workflow/scripts/mos_tid.py"
+    output: f"{RES}/mos/summary.json"
+    threads: 1
+    resources: mem_mb=600
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/mos"
+    log: "logs/mos_tid.log"
+    shell: "{params.env} {params.py} workflow/scripts/mos_tid.py --outdir {params.out} > {log} 2>&1"
+
+
+rule mos_variability:
+    input: "simws/studies/mos_variability.py", "simws/surrogate.py", "simws/tcad/mos.py", "workflow/scripts/mos_variability.py"
+    output: f"{RES}/mos_variability/summary.json"
+    threads: SWEEP_WORKERS
+    resources: mem_mb=lambda wc, threads: 400 * threads
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/mos_variability"
+    log: "logs/mos_variability.log"
+    shell: "{params.env} {params.py} workflow/scripts/mos_variability.py --outdir {params.out} --workers {threads} > {log} 2>&1"
+
+
+rule sic_checks:
+    input: "simws/tcad/sic.py", "simws/validation/sic_checks.py", "simws/materials/data/sic_4h.yaml", "workflow/scripts/sic_checks.py"
+    output: f"{RES}/sic/sic_checks.json"
+    threads: 1
+    resources: mem_mb=800
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/sic"
+    log: "logs/sic_checks.log"
+    shell: "{params.env} {params.py} workflow/scripts/sic_checks.py --outdir {params.out} > {log} 2>&1"
+
+
 rule paper:
     input: rules.all.input, rules.studies.input
     output: f"{RES}/figures/INDEX.json"

@@ -214,5 +214,17 @@
     "recorded": "2026-11-01",
     "rtol": 1e-06,
     "value": 0.7008506766836479
+  },
+  "simws.sic.BV_2e17_V": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 177.5120331405834
+  },
+  "simws.tid.tox20.dVmg_1Mrad_V": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": -0.43353233453088724
   }
 }

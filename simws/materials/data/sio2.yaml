@@ -6,4 +6,14 @@ parameters:
   density:       {value: 2.2,    unit: g/cm**3,       ref: "thermal oxide, typical", status: provisional}
   thermal_k:     {value: 0.014,  unit: W/cm/K,        ref: "Sze & Ng (2007)", status: verified}
   pair_energy:   {value: 17.0,   unit: eV,            ref: "Benedetto & Boesch, IEEE TNS 33, 1317 (1986)", status: verified}
+  # --- total ionizing dose (simws.radiation.tid)
+  tid_g0:        {value: 8.1e12, unit: cm**-3/rad, ref: "e-h pairs per rad(SiO2), McLean & Oldham, HDL-TR-2129 (1987); as used in Esqueda (2011)", status: verified}
+  tid_yield_E1:  {value: 0.5,    unit: MV/cm,  ref: "charge yield Y = (E1/|E| + 1)^-m, Co-60; Dozier, Fleetwood, Brown & Winokur, IEEE TNS 34, 1535 (1987)", status: verified}
+  tid_yield_m:   {value: 0.7,    unit: dimensionless, ref: "Dozier et al. (1987), Co-60", status: verified}
+  tid_f_ot:      {value: 0.05,   unit: dimensionless, ref: "fraction of escaping holes trapped near the interface; technology dependent (0.01-0.3), calibrate", status: provisional}
+  tid_N_ot_sat:  {value: 2.0e12, unit: cm**-2, ref: "oxide-trap saturation density; technology dependent, calibrate", status: provisional}
+  tid_N_SiH:     {value: 4.8e12, unit: cm**-2, ref: "Esqueda reduced interface-trap model, Table 2 of arXiv:2009.12652 (2020)", status: provisional}
+  tid_sigma_it:  {value: 3.2e-12, unit: cm**2, ref: "Esqueda reduced model, as above", status: provisional}
+  tid_N_DH:      {value: 7.3e17, unit: cm**-3, ref: "Esqueda reduced model, as above", status: provisional}
+  tid_sigma_DH:  {value: 3.0e-15, unit: cm**2, ref: "Esqueda reduced model, as above", status: provisional}
 profiles: {}

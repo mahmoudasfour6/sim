@@ -263,6 +263,60 @@ def fig_calibration(F, plt):
     plt.close(fig)
 
 
+def fig_mos_cv(F, plt):
+    d = np.loadtxt(F.R / "mos/cv_ideal.csv", delimiter=",", skiprows=1)
+    s = F.j("mos/summary.json")["results"]
+    cox = s["C_ox_F_cm2"]
+    fig, ax = plt.subplots(figsize=(3.4, 2.4))
+    ax.plot(d[:, 0], d[:, 1] / cox, color=CAT[0])
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("gate voltage (V)"); ax.set_ylabel("C / C_ox")
+    ax.set_title("Quasi-static C–V, 10 nm SiO₂ on p-Si 1e17 cm⁻³", loc="left")
+    F.save(fig, "fig_mos_cv", {"V": d[:, 0], "C_over_Cox": d[:, 1] / cox}, ["mos/summary.json"])
+    plt.close(fig)
+
+
+def fig_tid(F, plt):
+    s = F.j("mos/summary.json")["results"]["tid"]
+    keys = sorted(s, key=lambda k: float(k.split("_")[1][:-2]))
+    fig, ax = plt.subplots(figsize=(3.4, 2.6))
+    data = {}
+    for k, c in zip(keys, ramp(len(keys))):
+        r = s[k]
+        D = np.array(r["doses_krad"]); dv = -np.array(r["dV_mg"])
+        sel = D > 0
+        ax.loglog(D[sel], dv[sel], color=c, marker="o", ms=3.5, label=f"t_ox {k.split('_')[1].replace('nm', ' nm')}")
+        data[k] = {"dose_krad": D, "minus_dV_mg_V": dv, "E_ox_MV_cm": r["E_ox_MV_cm"]}
+    ax.set_xlabel("dose (krad(SiO₂))"); ax.set_ylabel("−ΔV_midgap (V)")
+    ax.set_title("Oxide-trapped charge shift grows ~ t_ox²", loc="left")
+    ax.legend(loc="upper left")
+    F.save(fig, "fig_tid_midgap_shift", data, ["mos/summary.json"])
+    plt.close(fig)
+
+
+def fig_mos_variability(F, plt):
+    s = F.j("mos_variability/summary.json")["results"]
+    outs = [o for o in ("V_fb", "V_inv", "C_min_over_C_ox") if o in s]
+    names = list(s[outs[0]]["sobol"])
+    fig, axes = plt.subplots(1, len(outs), figsize=(6.8, 2.2), sharey=True)
+    data = {}
+    for ax, o in zip(np.atleast_1d(axes), outs):
+        st = [s[o]["sobol"][n]["ST"] for n in names]
+        ax.barh(range(len(names)), st, height=0.55, color=CAT[0])
+        ax.set_xlim(0, 1); ax.grid(axis="y", visible=False)
+        unit = "" if o.startswith("C_") else " V"
+        label = {"V_fb": "V_fb", "V_inv": "V_inv", "C_min_over_C_ox": "C_min / C_ox"}.get(o, o)
+        ax.set_title(f"{label}: σ = {s[o]['std']:.2g}{unit}", loc="left", fontsize=8.5)
+        ax.set_xlabel("total-order Sobol index")
+        data[o] = {"names": names, "ST": st, "std": s[o]["std"], "loo_q2": s[o]["loo_q2"]}
+    np.atleast_1d(axes)[0].set_yticks(range(len(names)))
+    np.atleast_1d(axes)[0].set_yticklabels([n.replace("_", " ") for n in names])
+    fig.suptitle(f"MOS process variation (polynomial-chaos surrogate, {s['n_train']} runs)", x=0.01, y=1.06, ha="left",
+                 fontsize=9.5)
+    F.save(fig, "fig_mos_variability", data, ["mos_variability/summary.json"])
+    plt.close(fig)
+
+
 def methods_table(F):
     """Every material parameter the simulations use, with value, unit, status and reference (Markdown + LaTeX)."""
     from simws.materials import available, load
@@ -300,6 +354,9 @@ def main():
     F.run("mesh convergence", lambda: fig_convergence(F, plt))
     F.run("geant4 radial", lambda: fig_geant4_radial(F, plt))
     F.run("calibration", lambda: fig_calibration(F, plt))
+    F.run("mos cv", lambda: fig_mos_cv(F, plt))
+    F.run("tid", lambda: fig_tid(F, plt))
+    F.run("mos variability", lambda: fig_mos_variability(F, plt))
     F.run("methods table", lambda: methods_table(F))
     (F.out / "INDEX.json").write_text(json.dumps({"made": F.made, "skipped": F.skipped}, indent=1))
     print(f"figures in {F.out}: {len(F.made)} made")

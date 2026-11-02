@@ -97,6 +97,24 @@ $W/snakemake paper --cores 12 --resources mem_mb=20000     # everything + figure
 - **Study log**: `python tools/study.py new "question"` starts notes/<date>_<slug>.md (commit recorded);
   `python tools/study.py link <note> results/.../summary.json` appends the result with its provenance.
 
+## simws 0.5: MOS and total dose, process variation, 4H-SiC
+
+- **MOS capacitor** (`simws.tcad.mos`): gate / SiO2 / Si in 1D, quasi-static C-V, fixed interface charge `Q_f`,
+  oxide sheets at any depth (`oxide=[(nm_from_Si, cm^-2)]`), uniform interface traps `D_it` (neutral at
+  midgap). Solved with equilibrium carriers (no DC current flows, so this is exact for quasi-static C-V).
+  Checked against closed forms: flat band to 2e-9 V, Debye capacitance 2e-7, charge shifts 1e-9, D_it 1e-3.
+- **Total ionizing dose** (`simws.radiation.tid`): g0 = 8.1e12 pairs/(cm3 rad), field-dependent charge yield
+  (Dozier 1987), saturating oxide-trap buildup, hydrogen-model interface traps; `dose_response` re-solves
+  the device per dose and reports dV_fb, dV_midgap (oxide charge only) and dV at inversion. f_ot, N_sat and the
+  hydrogen-model set are technology dependent: calibrate them to your oxide before quoting absolute shifts.
+- **SRH trap level**: `Physics(trap_level_eV=E_t - E_i)` for deep-level traps (implementation exact to 1e-15).
+- **Process variation** (`simws.surrogate.PCE`): Latin-hypercube design in the inputs' own distributions
+  (normal or uniform), polynomial-chaos fit with leave-one-out Q2, Sobol indices from the coefficients, and
+  10^6-sample distributions (3-sigma quantiles). `mos_variability` rule: 100 MOS runs -> V_fb, V_inv, C_min.
+- **4H-SiC** (`simws.tcad.sic`): band gap and DOS masses (Ayalew 2004), nitrogen hexagonal/cubic and
+  aluminium incomplete ionization, Caughey-Thomas mobility with anisotropy along the c-axis, Hatakeyama 2004
+  impact ionization along/across c. Leakage in SiC is ~1e-30 A: probe breakdown with injected carriers.
+
 ## Single-event upset example
 
 ```python

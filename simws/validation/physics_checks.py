@@ -123,7 +123,8 @@ def intrinsic_vs_measured(mat=None):
 
 def run_all():
     res = {"equilibrium_bgn": equilibrium_bgn(), "mobility_resistors": mobility_resistors(),
-           "lifetime_bars": lifetime_bars(), "intrinsic_vs_measured": intrinsic_vs_measured()}
+           "lifetime_bars": lifetime_bars(), "intrinsic_vs_measured": intrinsic_vs_measured(),
+           "trap_level_generation": trap_level_generation()}
     res["pass"] = all(v["pass"] for v in res.values())
     return res
 
@@ -131,3 +132,40 @@ def run_all():
 if __name__ == "__main__":
     import json
     print(json.dumps(run_all(), indent=1, default=float))
+
+
+def trap_level_generation(mat=None):
+    """Reverse-biased p+/n diode with a midgap and a 0.1 eV trap. Checks (1) the SRH rate at every node equals the
+    formula with the trap level (exact), (2) the terminal current at the resolvable (lightly doped) contact equals
+    q*int(U), (3) the generation ratio is near the 1/cosh(Et/kT) depletion-approximation rule.
+    Note: next to a 1e19 contact the hole flux scale (~1e9 A/cm^2) is 1e18 times a leakage current, below double
+    precision, so leakage is read at the lightly doped contact and the heavy side is kept at 1e17 here."""
+    from devsim import get_node_model_values, get_contact_current
+    from simws.tcad.solve import ramp_bias
+    mat = mat or load("silicon")
+    L = 20e-4
+    out = {}
+    for et in (0.0, 0.1):
+        _mesh(L, [(0, 2e-7, "L"), (1e-4, 1e-7, None), (L, 2e-6, "R")])
+        setup_region("d", "si", mat, "ifelse(x < 1e-4, -1e17, 1e15)", "ifelse(x < 1e-4, 1e17, 1e15)",
+                     Physics(tau_n=1e-6, tau_p=1e-6, auger=False, bgn=False, trap_level_eV=et),
+                     {"left": False, "right": False})
+        ramp_bias("d", "left", -2.0, step=0.25, relative_error=1e-10)
+        g = lambda k: np.array(get_node_model_values(device="d", region="si", name=k))
+        U, V, n, p, nie = g("URecomb"), g("NodeVolume"), g("Electrons"), g("Holes"), g("n_ie")
+        Vt = K_B_EV * 300.0
+        U_ref = (n * p - nie ** 2) / (1e-6 * (n + nie * math.exp(et / Vt)) + 1e-6 * (p + nie * math.exp(-et / Vt)))
+        I_right = abs(get_contact_current(device="d", contact="right", equation="ElectronContinuityEquation")
+                      + get_contact_current(device="d", contact="right", equation="HoleContinuityEquation"))
+        out[et] = {"q_int_U": abs(Q_E * float(np.sum(U * V))), "I_terminal": I_right,
+                   "U_vs_formula": float(np.max(np.abs(U - U_ref)) / np.max(np.abs(U_ref)))}
+    ratio = out[0.1]["q_int_U"] / out[0.0]["q_int_U"]
+    expected = 1 / math.cosh(0.1 / (K_B_EV * 300.0))
+    cons = max(abs(v["I_terminal"] / v["q_int_U"] - 1) for v in out.values())
+    impl = max(v["U_vs_formula"] for v in out.values())
+    # exact: the implemented rate equals the SRH formula with n1 = n_ie e^(Et/kT), p1 = n_ie e^(-Et/kT) at every
+    # node; approximate: 1/cosh assumes n, p << n1, p1 across the whole depletion region (a shallower trap
+    # generates over a wider edge, so the ratio sits ~10 % above it)
+    return {"midgap": out[0.0], "Et_0.1eV": out[0.1], "generation_ratio": ratio, "cosh_rule_ratio": expected,
+            "terminal_vs_generation_worst": cons, "implementation_worst_rel": impl,
+            "pass": bool(impl < 1e-10 and cons < 0.05 and abs(ratio / expected - 1) < 0.2)}

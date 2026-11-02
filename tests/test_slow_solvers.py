@@ -324,3 +324,28 @@ def test_simws_figures_build(tmp_path):
     idx = json.loads((tmp_path / "INDEX.json").read_text())
     assert len(idx["made"]) >= 6, idx
     assert (tmp_path / "methods_parameters.tex").exists()
+
+
+# --------------------------------------------------------------------------- simws 0.5 (roadmap items 11, 16, 17)
+def test_simws_mos_and_tid(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "mos_tid.py", "--outdir", tmp_path],
+               REPO, timeout=1800, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "summary.json").read_text())["results"]
+    assert r["checks"]["pass"], r["checks"]
+    golden.verify({"simws.tid.tox20.dVmg_1Mrad_V": r["tid"]["tox_20nm"]["dV_mg"][-1]})
+
+
+def test_simws_mos_variability_surrogate(tmp_path):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "mos_variability.py", "--outdir", tmp_path,
+                        "--n-train", "40", "--n-test", "8"], REPO, timeout=2400, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "summary.json").read_text())["results"]
+    for o in ("V_fb", "V_inv"):
+        assert r[o]["loo_q2"] > 0.99 and r[o]["holdout_rmse"] < 0.01 * r[o]["std"] + 1e-4, r[o]
+
+
+def test_simws_sic_checks(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "sic_checks.py", "--outdir", tmp_path],
+               REPO, timeout=3000, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "sic_checks.json").read_text())["results"]
+    assert r["pass"], {k: v.get("pass") for k, v in r.items() if isinstance(v, dict)}
+    golden.verify({"simws.sic.BV_2e17_V": r["breakdown"]["BV_devsim"]})

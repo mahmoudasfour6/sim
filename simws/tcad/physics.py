@@ -8,7 +8,7 @@
 Models (each switchable in `Physics`; parameters and references in simws/materials/data/silicon.yaml):
   doping_mobility  Masetti (1983): mu(N, T), lattice part mu_max (T/300)^-zeta
   field_mobility   Caughey-Thomas velocity saturation with v_sat(T) (Canali 1975), on top of mu(N, T)
-  srh              Shockley-Read-Hall with Scharfetter lifetime tau(N) (T/300)^a
+  srh              Shockley-Read-Hall with Scharfetter lifetime tau(N) (T/300)^a, trap level E_t - E_i (trap_level_eV)
   auger            Dziewior-Schmid (1977) Auger recombination
   bgn              Slotboom band-gap narrowing (Klaassen 1992 parameters)
   impact           Van Overstraeten-de Man impact ionization with the optical-phonon temperature factor
@@ -44,6 +44,7 @@ class Physics:
     tau_p: Optional[float] = None
     mu_n: Optional[float] = None         # constant mobilities override the Masetti model (cm^2/Vs)
     mu_p: Optional[float] = None
+    trap_level_eV: float = 0.0           # SRH trap energy relative to the intrinsic level, E_t - E_i (deep-level traps)
     extra: Dict[str, float] = field(default_factory=dict)
 
 
@@ -101,11 +102,19 @@ def _masetti_expr(mat, T, c):
 
 def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: Physics = Physics(),
                  contacts: Optional[Dict[str, bool]] = None, extra_generation: Optional[str] = None,
-                 solve_equilibrium=True):
+                 solve_equilibrium=True, extra_charge=None, pre_solve=None, carriers=True):
     """Create every model and equation on `region`, the contacts in `contacts` (name -> is_circuit), and
     (optionally) solve the zero-bias equilibrium. `extra_generation` is a node expression in pairs/cm^3/s added
     to both continuity equations (e.g. an ion track). Bias parameters are '<contact>_bias' (simple_physics
-    naming); set them with set_parameter or simws.tcad.solve.ramp_bias. Returns a dict of the values used."""
+    naming); set them with set_parameter or simws.tcad.solve.ramp_bias. Returns a dict of the values used.
+
+    extra_charge: callable n_expr -> node expression of additional POSITIVE charge (elementary charges / cm^3),
+                  given the electron-density expression to use (IntrinsicElectrons in the potential-only start,
+                  Electrons afterwards); used for fixed oxide/interface charge and interface traps (simws.tcad.mos).
+    pre_solve:    callable run after this region's Potential exists and before the first solve (e.g. to add an
+                  oxide region's interface and gate contact).
+    carriers:     False stops after the equilibrium (Poisson-Boltzmann) stage: carriers follow the potential with a
+                  flat Fermi level. Exact for structures that carry no DC current (MOS quasi-static C-V)."""
     from devsim import equation, set_node_values, set_parameter, solve
     from devsim.python_packages.model_create import (CreateEdgeModel, CreateEdgeModelDerivatives, CreateNodeModel,
                                                       CreateNodeModelDerivative, CreateSolution)
@@ -133,7 +142,8 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     CreateSolution(device, region, "Potential")
     for name, expr in (("IntrinsicElectrons", "n_i*exp((Potential + 0.5*DeltaEg)/V_t)"),
                        ("IntrinsicHoles", "n_i*exp(-(Potential - 0.5*DeltaEg)/V_t)"),
-                       ("PotentialIntrinsicCharge", "-ElectronCharge*kahan3(IntrinsicHoles, -IntrinsicElectrons, NetDoping)")):
+                       ("PotentialIntrinsicCharge", "-ElectronCharge*(kahan3(IntrinsicHoles, -IntrinsicElectrons, NetDoping)"
+                        + (f" + {extra_charge('IntrinsicElectrons')}" if extra_charge else "") + ")")):
         CreateNodeModel(device, region, name, expr)
         CreateNodeModelDerivative(device, region, name, expr, "Potential")
     for name, expr in (("ElectricField", "(Potential@n0 - Potential@n1)*EdgeInverseLength"),
@@ -150,8 +160,12 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
             except Exception:  # noqa: BLE001
                 set_parameter(device=device, name=_bias(c), value=0.0)
         _potential_contact(device, region, c, circ)
+    if pre_solve:
+        pre_solve()
     if solve_equilibrium:
         solve(type="dc", absolute_error=1.0, relative_error=1e-10, maximum_iterations=60)
+    if not carriers:
+        return used
 
     # carriers
     CreateSolution(device, region, "Electrons"); CreateSolution(device, region, "Holes")
@@ -210,7 +224,9 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
         else:
             CreateNodeModel(device, region, "tau_n", str(phys.tau_n))
             CreateNodeModel(device, region, "tau_p", str(phys.tau_p if phys.tau_p is not None else phys.tau_n))
-        terms.append("(Electrons*Holes - n_ie^2)/(tau_p*(Electrons + n_ie) + tau_n*(Holes + n_ie))")
+        et = phys.trap_level_eV
+        n1, p1 = (f"n_ie*exp({et}/V_t)", f"n_ie*exp({-et}/V_t)") if et else ("n_ie", "n_ie")
+        terms.append(f"(Electrons*Holes - n_ie^2)/(tau_p*(Electrons + {n1}) + tau_n*(Holes + {p1}))")
     if phys.auger:
         terms.append(f"({mat.get('auger_Cn', 'cm**6/s')}*Electrons + {mat.get('auger_Cp', 'cm**6/s')}*Holes)"
                      "*(Electrons*Holes - n_ie^2)")
@@ -228,7 +244,8 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
                             ("PCharge", "ElectronCharge*Holes", "Holes")):
         CreateNodeModel(device, region, name, expr)
         CreateNodeModelDerivative(device, region, name, expr, var)
-    pne = "-ElectronCharge*kahan3(Holes, -Electrons, NetDoping)"
+    pne = ("-ElectronCharge*(kahan3(Holes, -Electrons, NetDoping)"
+           + (f" + {extra_charge('Electrons')}" if extra_charge else "") + ")")
     CreateNodeModel(device, region, "PotentialNodeCharge", pne)
     for v in ("Electrons", "Holes"):
         CreateNodeModelDerivative(device, region, "PotentialNodeCharge", pne, v)

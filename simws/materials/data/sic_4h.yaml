@@ -4,14 +4,50 @@
 name: sic_4h
 reference_temperature: {value: 300, unit: K}
 parameters:
-  eps_r:         {value: 9.66,   unit: dimensionless, ref: "Ioffe NSM archive, 4H-SiC (perpendicular to c)", status: provisional}
+  eps_r:         {value: 9.66,   unit: dimensionless, ref: "perpendicular to c; Patrick & Choyke, PRB 2, 2255 (1970), as tabulated in arXiv:2410.06798", status: verified}
+  eps_r_par:     {value: 10.03,  unit: dimensionless, ref: "parallel to c; Patrick & Choyke (1970), as above", status: verified}
   Eg:            {value: 3.26,   unit: eV,            ref: "Ioffe NSM archive", status: provisional}
   n_i:           {value: 5.0e-9, unit: cm**-3,        ref: "Ioffe NSM archive (order of magnitude)", status: provisional}
-  mu_n:          {value: 950,    unit: cm**2/V/s,     ref: "Ioffe NSM archive (perpendicular to c)", status: provisional}
-  mu_p:          {value: 115,    unit: cm**2/V/s,     ref: "Ioffe NSM archive", status: provisional}
+  mu_n:          {value: 950,    unit: cm**2/V/s,     ref: "mu_max, perpendicular to c; Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  mu_p:          {value: 125,    unit: cm**2/V/s,     ref: "mu_max; Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
   v_sat:         {value: 2.2e7,  unit: cm/s,          ref: "Ioffe NSM archive", status: provisional}
   density:       {value: 3.21,   unit: g/cm**3,       ref: "Ioffe NSM archive", status: provisional}
   thermal_k:     {value: 3.7,    unit: W/cm/K,        ref: "Ioffe NSM archive (3.3-4.9 depending on doping/orientation)", status: provisional}
   heat_capacity: {value: 0.69,   unit: J/g/K,         ref: "Ioffe NSM archive", status: provisional}
   pair_energy:   {value: 7.8,    unit: eV,            ref: "literature range 7.6-8.4 eV for 4H-SiC", status: provisional}
+  # --- band structure (simws.tcad.sic)
+  varshni_Eg0:   {value: 3.265,  unit: eV,     ref: "exciton gap at 4 K; Ayalew, PhD thesis, TU Wien (2004), Table 3.2 (Patrick 1965)", status: verified}
+  varshni_alpha: {value: 3.3e-2, unit: eV/K,   ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.2 (6H absorption data, assumed for 4H)", status: verified}
+  varshni_beta:  {value: 1.0e5,  unit: K,      ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.2", status: verified}
+  exciton_binding: {value: 0.020, unit: eV,    ref: "indirect gap = exciton gap + ~20 meV; Ayalew, PhD thesis, TU Wien (2004), Sec. 3.2.1", status: provisional}
+  m_dos_n:       {value: 0.39,   unit: dimensionless, ref: "electron DOS mass per valley, M_c = 3; Ayalew, PhD thesis, TU Wien (2004), Table 3.3", status: verified}
+  valleys_n:     {value: 3,      unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.3", status: verified}
+  m_dos_p:       {value: 0.82,   unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.3", status: verified}
+  # --- incomplete ionization (Ayalew, PhD thesis, TU Wien (2004), Sec. 3.6, Table 3.9)
+  ion_N_h:       {value: 0.050,  unit: eV, ref: "N donor, hexagonal site (50 +- 5 meV); Ayalew, PhD thesis, TU Wien (2004), Table 3.9", status: verified}
+  ion_N_k:       {value: 0.090,  unit: eV, ref: "N donor, cubic site (90 +- 5 meV); Ayalew, PhD thesis, TU Wien (2004), Table 3.9", status: verified}
+  ion_Al:        {value: 0.200,  unit: eV, ref: "Al acceptor (tabulated 220 +- 20 meV, 200 meV used in the thesis); falls with doping (Troffer 1997)", status: provisional}
+  g_D:           {value: 2,      unit: dimensionless, ref: "donor degeneracy factor; Ayalew, PhD thesis, TU Wien (2004), Sec. 3.6", status: verified}
+  g_A:           {value: 4,      unit: dimensionless, ref: "acceptor degeneracy factor; Ayalew, PhD thesis, TU Wien (2004), Sec. 3.6", status: verified}
+  # --- doping-dependent mobility, Caughey-Thomas, perpendicular to c (Ayalew, PhD thesis, TU Wien (2004), Table 3.5)
+  ct_mumin_n:    {value: 40.0,   unit: cm**2/V/s, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Nref_n:     {value: 1.94e17, unit: cm**-3,   ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_alpha_n:    {value: 0.61,   unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Tmax_n:     {value: -2.40,  unit: dimensionless, ref: "mu_max ~ (T/300)^gamma; Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Tmin_n:     {value: -0.5,   unit: dimensionless, ref: "mu_min ~ (T/300)^beta; Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_mumin_p:    {value: 15.9,   unit: cm**2/V/s, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Nref_p:     {value: 1.76e19, unit: cm**-3,   ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_alpha_p:    {value: 0.34,   unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Tmax_p:     {value: -2.15,  unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  ct_Tmin_p:     {value: -0.5,   unit: dimensionless, ref: "Ayalew, PhD thesis, TU Wien (2004), Table 3.5", status: verified}
+  aniso_n:       {value: 1.2,    unit: dimensionless, ref: "mu_n,par / mu_n,perp (holes isotropic); Schaffer et al., as reported in Ayalew, PhD thesis, TU Wien (2004), Eqs. 3.80-3.81", status: verified}
+  # --- impact ionization, Chynoweth a exp(-b/E), Hatakeyama et al., APL 85, 1380 (2004), Table I
+  ii_a_n_par:    {value: 1.76e8, unit: 1/cm, ref: "electrons along <0001>; Hatakeyama et al. (2004), Table I", status: verified}
+  ii_b_n_par:    {value: 3.30e7, unit: V/cm, ref: "Hatakeyama et al. (2004), Table I", status: verified}
+  ii_a_p_par:    {value: 3.41e8, unit: 1/cm, ref: "holes along <0001>; Hatakeyama et al. (2004), Table I", status: verified}
+  ii_b_p_par:    {value: 2.50e7, unit: V/cm, ref: "Hatakeyama et al. (2004), Table I", status: verified}
+  ii_a_n_perp:   {value: 2.10e7, unit: 1/cm, ref: "electrons along <11-20>; Hatakeyama et al. (2004), Table I", status: verified}
+  ii_b_n_perp:   {value: 1.70e7, unit: V/cm, ref: "Hatakeyama et al. (2004), Table I", status: verified}
+  ii_a_p_perp:   {value: 2.96e7, unit: 1/cm, ref: "holes along <11-20>; Hatakeyama et al. (2004), Table I", status: verified}
+  ii_b_p_perp:   {value: 1.60e7, unit: V/cm, ref: "Hatakeyama et al. (2004), Table I", status: verified}
 profiles: {}
