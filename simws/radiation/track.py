@@ -60,6 +60,21 @@ class IonTrack:
         lateral = np.exp(-((x - self.x0_um) / self.radius_um) ** 2) / (math.sqrt(math.pi) * a_cm)
         return pairs_per_cm(self.let_at(y - self.y_entry_um), mat) / W_cm * lateral
 
+    def density_axisymmetric(self, mat, r_um, z_um):
+        """Time-integrated pair density (pairs/cm^3) of a round track on the axis r = 0 of an r-z simulation:
+        N(z) exp(-r^2/a^2) / (pi a^2), which integrates to N(z) over the cross-section exactly."""
+        r, z = np.asarray(r_um, float), np.asarray(z_um, float)
+        a_cm = self.radius_um * 1e-4
+        return pairs_per_cm(self.let_at(z - self.y_entry_um), mat) * np.exp(-(r / self.radius_um) ** 2) / (math.pi * a_cm ** 2)
+
+    def footprint_axisymmetric(self, mat, r_um, z_um, node_volume_cm3):
+        """Nodal density rescaled so sum(density * NodeVolume) equals total_pairs exactly (NodeVolume from
+        DEVSIM's cylindrical models, which include 2 pi). Returns (density, correction factor)."""
+        dens = self.density_axisymmetric(mat, r_um, z_um)
+        on_mesh = float((dens * node_volume_cm3).sum())
+        factor = self.total_pairs(mat) / on_mesh if on_mesh > 0 else float("nan")
+        return dens * factor, factor
+
     def footprint(self, mat, x_um, y_um, node_volume_cm2):
         """Nodal pair density rescaled so sum(footprint * NodeVolume) * W equals total_pairs exactly. The
         correction factor (returned) measures how well the mesh resolves the track; keep it within a few %."""

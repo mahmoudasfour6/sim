@@ -25,13 +25,14 @@ _EABS = "pow(ElectricField^2 + 1, 0.5)"
 _JABS = "pow({0}^2 + 1e-24, 0.5)"
 
 
-def field_dependent_mobility(device, region, mat, mu_n0="mu_n", mu_p0="mu_p"):
+def field_dependent_mobility(device, region, mat, mu_n0="mu_n", mu_p0="mu_p", vsat=None):
     """Create edge models mu_n_fd / mu_p_fd. mu_n0/mu_p0 may be parameters or edge models (e.g. mu_n_T from
-    simws.coupling.electrothermal), so velocity saturation composes with lattice-temperature dependence."""
-    vsat = mat.get("v_sat", "cm/s")
+    simws.coupling.electrothermal), so velocity saturation composes with lattice-temperature dependence.
+    vsat = (v_n, v_p) in cm/s; default: the material's single v_sat for both carriers."""
+    vs = vsat or (mat.get("v_sat", "cm/s"),) * 2
     out = []
-    for carrier, mu0, beta in (("n", mu_n0, mat.get("ct_beta_n", "dimensionless")),
-                               ("p", mu_p0, mat.get("ct_beta_p", "dimensionless"))):
+    for carrier, mu0, beta, vsat in (("n", mu_n0, mat.get("ct_beta_n", "dimensionless"), vs[0]),
+                                     ("p", mu_p0, mat.get("ct_beta_p", "dimensionless"), vs[1])):
         name = f"mu_{carrier}_fd"
         expr = f"{mu0} / pow(1 + pow({mu0} * {_EABS} / {vsat}, {beta}), {1.0 / beta})"
         CreateEdgeModel(device, region, name, expr)
@@ -40,33 +41,36 @@ def field_dependent_mobility(device, region, mat, mu_n0="mu_n", mu_p0="mu_p"):
     return tuple(out)
 
 
-def alpha_expressions(mat):
-    an, bn = mat.get("ii_a_n", "1/cm"), mat.get("ii_b_n", "V/cm")
-    apl, bpl = mat.get("ii_a_p_low", "1/cm"), mat.get("ii_b_p_low", "V/cm")
-    aph, bph = mat.get("ii_a_p_high", "1/cm"), mat.get("ii_b_p_high", "V/cm")
+def alpha_expressions(mat, gamma=1.0):
+    """Van Overstraeten-de Man alpha = gamma a exp(-gamma b / |E|); gamma(T) from simws.tcad.physics.impact_gamma
+    (1 at 300 K)."""
+    an, bn = gamma * mat.get("ii_a_n", "1/cm"), gamma * mat.get("ii_b_n", "V/cm")
+    apl, bpl = gamma * mat.get("ii_a_p_low", "1/cm"), gamma * mat.get("ii_b_p_low", "V/cm")
+    aph, bph = gamma * mat.get("ii_a_p_high", "1/cm"), gamma * mat.get("ii_b_p_high", "V/cm")
     E0 = mat.get("ii_E0", "V/cm")
     alpha_n = f"({an} * exp(-{bn} / {_EABS}))"
     alpha_p = f"ifelse({_EABS} < {E0}, {apl} * exp(-{bpl} / {_EABS}), {aph} * exp(-{bph} / {_EABS}))"
     return alpha_n, alpha_p
 
 
-def alpha_numpy(mat, E):
+def alpha_numpy(mat, E, gamma=1.0):
     """Same coefficients for post-processing (E in V/cm, numpy array). Returns (alpha_n, alpha_p) in 1/cm."""
     import numpy as np
+    g = gamma
     E = np.sqrt(np.asarray(E, float) ** 2 + 1.0)
-    an = mat.get("ii_a_n", "1/cm") * np.exp(-mat.get("ii_b_n", "V/cm") / E)
+    an = g * mat.get("ii_a_n", "1/cm") * np.exp(-g * mat.get("ii_b_n", "V/cm") / E)
     ap = np.where(E < mat.get("ii_E0", "V/cm"),
-                  mat.get("ii_a_p_low", "1/cm") * np.exp(-mat.get("ii_b_p_low", "V/cm") / E),
-                  mat.get("ii_a_p_high", "1/cm") * np.exp(-mat.get("ii_b_p_high", "V/cm") / E))
+                  g * mat.get("ii_a_p_low", "1/cm") * np.exp(-g * mat.get("ii_b_p_low", "V/cm") / E),
+                  g * mat.get("ii_a_p_high", "1/cm") * np.exp(-g * mat.get("ii_b_p_high", "V/cm") / E))
     return an, ap
 
 
-def impact_ionization(device, region, mat):
+def impact_ionization(device, region, mat, gamma=1.0):
     """Add avalanche generation to the electron and hole continuity equations (redefines both equations
     with the same names, variables and models as simple_physics, plus an edge-volume source)."""
     from devsim import equation
 
-    alpha_n, alpha_p = alpha_expressions(mat)
+    alpha_n, alpha_p = alpha_expressions(mat, gamma)
     gii = (f"({alpha_n} * {_JABS.format('ElectronCurrent')} + {alpha_p} * {_JABS.format('HoleCurrent')})"
            " / ElectronCharge")
     CreateEdgeModel(device, region, "ImpactGeneration", gii)
@@ -80,6 +84,7 @@ def impact_ionization(device, region, mat):
     equation(device=device, region=region, name="ElectronContinuityEquation", variable_name="Electrons",
              time_node_model="NCharge", edge_model="ElectronCurrent", variable_update="positive",
              node_model="ElectronGeneration", edge_volume_model="ImpactSourceElectron")
+    # (time_node_model / node_model names are the same in simws.tcad.physics and simple_physics)
     equation(device=device, region=region, name="HoleContinuityEquation", variable_name="Holes",
              time_node_model="PCharge", edge_model="HoleCurrent", variable_update="positive",
              node_model="HoleGeneration", edge_volume_model="ImpactSourceHole")

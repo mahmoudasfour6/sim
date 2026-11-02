@@ -16,6 +16,9 @@ mkdir -p results/nightly
   echo "== workflow (cores=$CORES mem_mb=$MEM)"
   $E/workflow/bin/snakemake all studies --cores $CORES --resources mem_mb=$MEM -q 2>&1 | tail -5; wf=${PIPESTATUS[0]}
   echo "== results"; $E/workflow/bin/python tools/summarize_results.py
+  if git remote | grep -qx offsite; then
+    echo "== off-laptop backup"; git push -q offsite --all 2>&1 | tail -2; echo "  pushed $(git rev-parse --short HEAD)"
+  fi
   echo "== summary: fast=$fast slow=$slow workflow=$wf (0 = pass)"
 } > "$LOG" 2>&1
 tail -1 "$LOG" > results/nightly/LATEST.txt

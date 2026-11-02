@@ -27,9 +27,15 @@ ls $E/process_rad/bin/x86_64-conda-linux-gnu-c++ >/dev/null 2>&1 || command -v g
   || ~/miniforge3/bin/mamba install -y -q -n process_rad -c conda-forge cxx-compiler
 bash tools/geant4_track/build.sh $E/process_rad
 
-step "4/9 slow-tier additions + gitignore"
+step "4/9 slow-tier additions, test collection, gitignore"
 grep -q "test_simws_unit_suite_in_tcad_env" tests/test_slow_solvers.py || cat tests/slow_simws_addition.py >> tests/test_slow_solvers.py
-rm -f tests/slow_simws_addition.py
+grep -q "test_simws_axisymmetric_seu" tests/test_slow_solvers.py || cat tests/slow_simws_v3_addition.py >> tests/test_slow_solvers.py
+rm -f tests/slow_simws_addition.py tests/slow_simws_v3_addition.py
+# unit tests need the tcad env: keep the workflow-env runs from collecting (and skipping) them; the slow tier
+# runs them in tcad with the ini options overridden
+grep -q -- "--ignore=tests/unit" pytest.ini || sed -i 's|^addopts = \(.*\)$|addopts = \1 --ignore=tests/unit|' pytest.ini
+sed -i 's|"-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/unit"\]|"-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "tests/unit"]|' tests/test_slow_solvers.py
+grep -n "^addopts" pytest.ini
 for pat in results/ logs/ .snakemake/ tools/geant4_track/g4track; do grep -qxF "$pat" .gitignore || echo "$pat" >> .gitignore; done
 
 step "5/9 unit tests (tcad env)"
@@ -62,10 +68,11 @@ for env in tcad quantum_iii_v process_rad; do
   ~/miniforge3/bin/conda env export -n $env > envs/$env.yml 2>/dev/null
   ~/miniforge3/bin/conda list -n $env --explicit --md5 > envs/$env.explicit.txt
 done
-git add -A simws config workflow pyproject.toml tests pipeline tools .gitignore envs/tcad.* envs/quantum_iii_v.* envs/process_rad.*
-git commit -q -m "simws 0.2: material DB, package, Snakemake workflow, field I/O, electrothermal coupling; device models (velocity saturation, impact ionization), Geant4/SRIM ion tracks, mixed-mode SEU, local sweeps/UQ store, solution verification, local benchmark and nightly job" \
+git add -A simws config workflow pyproject.toml tests pipeline tools docs pytest.ini .gitignore envs/tcad.* envs/quantum_iii_v.* envs/process_rad.*
+git commit -q -m "simws 0.3: full drift-diffusion physics (Masetti mobility, Scharfetter SRH, Auger, consistent band-gap narrowing, temperature dependence), axisymmetric ion strikes at realistic doping, I-V/C-V calibration with uncertainty, off-site backup, MKL opt-in, verified material references" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push -q && git log --oneline -1
+git remote | grep -qx offsite && git push -q offsite --all && echo "  pushed to offsite" || echo "  (no off-site remote yet: see tools/setup_offsite_backup.sh)"
 WINUSER=$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')
 cp tools/register_nightly.ps1 "/mnt/c/Users/$WINUSER/sim_backup/register_nightly.ps1" 2>/dev/null || true
 echo; echo "DONE. To schedule the nightly run, open Windows PowerShell and run:"

@@ -200,7 +200,7 @@ def _simws_env():
 
 def test_simws_unit_suite_in_tcad_env():
     """Package unit tests in the tcad env, where every dependency exists: nothing may be skipped there."""
-    out = run_in_env("tcad", [env_python("tcad"), "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/unit"],
+    out = run_in_env("tcad", [env_python("tcad"), "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "tests/unit"],
                      REPO, timeout=900, extra_env=_simws_env())
     assert re.search(r"\d+ passed", out) and "skipped" not in out and "failed" not in out, out[-1500:]
 
@@ -260,3 +260,31 @@ def test_simws_geant4_track(tmp_path, golden):
     assert abs(res["LET_ratio_entrance_deposit_to_G4EmCalculator"] - 1) < 0.08, res
     assert res["radius_90pct_energy_um"] < 0.5
     golden.verify({"simws.geant4.O16_100MeV.LET_G4EmCalculator": res["meta"]["entrance_LET_MeV_cm2_per_mg"]})
+
+
+# --------------------------------------------------------------------------- simws 0.3 (roadmap items 5-8)
+def test_simws_physics_checks(tmp_path, golden):
+    """BGN-consistent equilibrium, Masetti mobility, SRH+Auger lifetimes, n_i(T) vs measured, r-z volumes."""
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "physics_checks.py", "--outdir", tmp_path],
+               REPO, timeout=900, threads=1, extra_env=_simws_env())
+    res = json.loads((tmp_path / "physics_checks.json").read_text())["results"]
+    assert res["pass"], res
+    golden.verify({"simws.physics.DeltaEg_max_meV": res["equilibrium_bgn"]["DeltaEg_max_meV"]})
+
+
+def test_simws_axisymmetric_seu(tmp_path, golden):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "axisymmetric.py", "--outdir", tmp_path,
+                        "--lets", "10"], REPO, timeout=2400, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "summary.json").read_text())["results"]
+    assert r["track_mesh_correction"] > 0.9
+    assert r["collected_charge_drain_fC"] < r["deposited_charge_fC"]
+    assert abs(r["collected_charge_drain_fC"] / r["collected_charge_sub_fC"] - 1) < 0.01   # charge conservation
+    golden.verify({"simws.axi.let10.collected_drain_fC": r["collected_charge_drain_fC"],
+                   "simws.axi.let10.peak_drain_A": r["peak_drain_current_A"]})
+
+
+def test_simws_calibration_selftest(tmp_path):
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "calibration_selftest.py", "--outdir",
+                        tmp_path], REPO, timeout=1800, threads=1, extra_env=_simws_env())
+    res = json.loads((tmp_path / "selftest.json").read_text())["results"]
+    assert res["pass"], res

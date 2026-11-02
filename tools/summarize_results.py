@@ -5,10 +5,14 @@ from pathlib import Path
 R = Path("results")
 
 
+class NotRun(Exception):
+    pass
+
+
 def get(path, *keys):
     p = R / path
     if not p.exists():
-        return None
+        raise NotRun
     d = json.loads(p.read_text())["results"]
     for k in keys:
         d = d[k]
@@ -19,6 +23,8 @@ def line(label, fn):
     try:
         v = fn()
         print(f"  {label:34s} {v if v is not None else '(not run)'}")
+    except NotRun:
+        print(f"  {label:34s} (not run)")
     except Exception as e:  # noqa: BLE001
         print(f"  {label:34s} error: {e}")
 
@@ -29,7 +35,10 @@ line("electrothermal 5 V", lambda: (lambda p: f"I = {p['current_A_per_cm']:.4f} 
 line("device-model validation", lambda: (lambda r: f"pass={r['pass']}, BV DEVSIM {r['breakdown_V_devsim']:.2f} V vs integral {r['breakdown_V_ionization_integral']:.2f} V")(get("models/validation.json")))
 line("mixed-mode RC check", lambda: f"{get('mixed_mode/summary.json', 'rc_check', 'worst_abs_dev_frac_of_vinf'):.1e} of V_inf")
 line("SEU node dips", lambda: ", ".join(f"LET {s['case']['let']:g}: {s['v_node_initial_V']:.2f}->{s['v_node_min_V']:.2f} V" for s in get("mixed_mode/summary.json", "seu")))
-line("critical LET (planar 2D)", lambda: get("mixed_mode/summary.json", "critical_let_MeV_cm2_mg"))
+line("critical LET (planar 2D)", lambda: (lambda v: f"{v:.3g} MeV cm2/mg" if v else "not bracketed")(get("mixed_mode/summary.json", "critical_let_MeV_cm2_mg")))
+line("physics model checks", lambda: (lambda r: f"pass={r['pass']}: equilibrium J/scale {r['equilibrium_bgn']['current_over_scale']:.1e}, mobility {r['mobility_resistors']['worst_rel_diff']:.1e}, lifetime {r['lifetime_bars']['worst_rel_diff']:.1e}")(get("models/physics_checks.json")))
+line("axisymmetric SEU (LET 10)", lambda: (lambda r: f"collected {r['collected_charge_drain_fC']:.1f} of {r['deposited_charge_fC']:.1f} fC deposited, peak {1e3 * r['peak_drain_current_A']:.2f} mA")(get("axisymmetric/summary.json")))
+line("calibration self-test", lambda: (lambda r: "recovered " + ", ".join(f"{k} {v['fit']:.3g} (true {v['true']:.3g}, in 95%: {v['inside_95']})" for k, v in r['parameters'].items()))(get("calibration/selftest.json")))
 line("Geant4 O-16 100 MeV LET", lambda: (lambda r: f"{r['meta']['entrance_LET_MeV_cm2_per_mg']:.3f} MeV cm2/mg, 90 % energy within {r['radius_90pct_energy_um']:.3f} um")(get("geant4_track/summary.json")))
 line("Sobol T_max (total order)", lambda: ", ".join(f"{k} {v['ST']:.2f}" for k, v in get("sweeps/electrothermal_sobol/summary.json", "T_max_K", "sobol").items()))
 line("mesh convergence T_max", lambda: (lambda r: f"p = {r['order']:.2f}, GCI {100 * r['gci_fine']:.1e} %")(get("verification/electrothermal_mesh.json")))

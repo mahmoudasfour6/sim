@@ -42,6 +42,8 @@ rule all:
         f"{RES}/models/validation.json",
         f"{RES}/mixed_mode/summary.json",
         f"{RES}/geant4_track/summary.json",
+        f"{RES}/models/physics_checks.json",
+        f"{RES}/calibration/selftest.json",
 
 # Heavier studies, run on demand or by the nightly job:  snakemake --cores 12 studies
 rule studies:
@@ -49,6 +51,7 @@ rule studies:
         f"{RES}/sweeps/electrothermal_sobol/summary.json",
         f"{RES}/verification/electrothermal_mesh.json",
         f"{RES}/verification/particle_strike_dt.json",
+        f"{RES}/axisymmetric/summary.json",
 
 
 rule materials_table:
@@ -147,3 +150,33 @@ rule convergence:
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/verification"
     log: "logs/convergence_{study}.log"
     shell: "{params.env} {params.py} workflow/scripts/convergence.py --study {wildcards.study} --outdir {params.out} > {log} 2>&1"
+
+
+rule physics_checks:
+    input: "simws/tcad/physics.py", "simws/tcad/axisym.py", "simws/validation/physics_checks.py", "simws/materials/data/silicon.yaml"
+    output: f"{RES}/models/physics_checks.json"
+    threads: 1
+    resources: mem_mb=600
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/models"
+    log: "logs/physics_checks.log"
+    shell: "{params.env} {params.py} workflow/scripts/physics_checks.py --outdir {params.out} > {log} 2>&1"
+
+
+rule axisymmetric:
+    input: "simws/tcad/axisym.py", "simws/tcad/physics.py", "simws/radiation/track.py"
+    output: f"{RES}/axisymmetric/summary.json"
+    threads: 1
+    resources: mem_mb=1500
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/axisymmetric", lets=config.get("axi_lets", "1,10,40")
+    log: "logs/axisymmetric.log"
+    shell: "{params.env} {params.py} workflow/scripts/axisymmetric.py --outdir {params.out} --lets {params.lets} > {log} 2>&1"
+
+
+rule calibration_selftest:
+    input: "simws/calibrate.py", "simws/tcad/physics.py"
+    output: f"{RES}/calibration/selftest.json"
+    threads: 1
+    resources: mem_mb=600
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/calibration"
+    log: "logs/calibration_selftest.log"
+    shell: "{params.env} {params.py} workflow/scripts/calibration_selftest.py --outdir {params.out} > {log} 2>&1"

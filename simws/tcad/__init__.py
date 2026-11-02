@@ -6,7 +6,19 @@ fails with 'Unrecognized "direct_solver" parameter value "unknown"'. The wrapper
 globals once and restores them after each reset. Only those start-up globals are restored, never parameters a
 simulation set later (e.g. contact biases), so the reset still gives a clean state.
 """
-import devsim as _devsim
+import glob as _glob
+import os as _os
+import sys as _sys
+
+# Linear solver. UMFPACK (DEVSIM's default fallback) is the default here: in tests on this workspace's devices,
+# MKL PARDISO failed LU factorization on the electrothermal resistor and did not cure the minority-carrier
+# Newton cycling seen in mixed-mode runs. Opt in with SIMWS_DEVSIM_SOLVER=mkl (needs `mkl` in the env).
+if _os.environ.get("SIMWS_DEVSIM_SOLVER", "").lower() == "mkl" and "DEVSIM_MATH_LIBS" not in _os.environ:
+    _mkl = sorted(_glob.glob(_os.path.join(_sys.prefix, "lib", "libmkl_rt.so*")))
+    if _mkl:
+        _os.environ["DEVSIM_MATH_LIBS"] = _mkl[-1]
+
+import devsim as _devsim  # noqa: E402
 
 if not getattr(_devsim.reset_devsim, "_simws_safe", False):
     _raw_reset = _devsim.reset_devsim

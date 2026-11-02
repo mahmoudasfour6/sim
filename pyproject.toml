@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simws"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared physics parameters, field I/O and coupling layer for the sim_workspace toolchain"
 requires-python = ">=3.10"
 dependencies = ["numpy", "pyyaml", "pint"]

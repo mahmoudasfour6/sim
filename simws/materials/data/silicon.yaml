@@ -7,13 +7,13 @@ parameters:
   eps_r:            {value: 11.7,     unit: dimensionless, ref: "Sze & Ng, Physics of Semiconductor Devices, 3rd ed. (2007), App. G", status: verified}
   Eg:               {value: 1.12,     unit: eV,            ref: "Sze & Ng (2007), App. G", status: verified}
   n_i:              {value: 9.65e9,   unit: cm**-3,        ref: "Altermatt et al., J. Appl. Phys. 93, 1598 (2003)", status: verified}
-  varshni_Eg0:      {value: 1.170,    unit: eV,            ref: "Thurmond, J. Electrochem. Soc. 122, 1133 (1975)", status: provisional}
-  varshni_alpha:    {value: 4.73e-4,  unit: eV/K,          ref: "Thurmond (1975)", status: provisional}
-  varshni_beta:     {value: 636,      unit: K,             ref: "Thurmond (1975)", status: provisional}
+  varshni_Eg0:      {value: 1.170,    unit: eV,            ref: "Thurmond, J. Electrochem. Soc. 122, 1133 (1975); Palankovski thesis (TU Wien 2000) Table 3.8 gives 1.1695", status: verified}
+  varshni_alpha:    {value: 4.73e-4,  unit: eV/K,          ref: "Thurmond (1975); Palankovski (2000) Table 3.8", status: verified}
+  varshni_beta:     {value: 636,      unit: K,             ref: "Thurmond (1975); Palankovski (2000) Table 3.8", status: verified}
   mu_n:             {value: 1414,     unit: cm**2/V/s,     ref: "Masetti et al., IEEE TED 30, 764 (1983), lattice-limited mu_max", status: verified}
   mu_p:             {value: 470.5,    unit: cm**2/V/s,     ref: "Masetti et al. (1983)", status: verified}
-  mu_n_T_exponent:  {value: 2.5,      unit: dimensionless, ref: "common TCAD constant-mobility default, mu ~ (T/300)^-zeta", status: provisional}
-  mu_p_T_exponent:  {value: 2.2,      unit: dimensionless, ref: "common TCAD constant-mobility default", status: provisional}
+  mu_n_T_exponent:  {value: 2.5,      unit: dimensionless, ref: "mu ~ (T/300)^-zeta; Palankovski, PhD thesis, TU Wien (2000), as tabulated in the nextnano Si database", status: verified}
+  mu_p_T_exponent:  {value: 2.2,      unit: dimensionless, ref: "Palankovski, PhD thesis, TU Wien (2000), as tabulated in the nextnano Si database", status: verified}
   v_sat:            {value: 1.0e7,    unit: cm/s,          ref: "Sze & Ng (2007)", status: verified}
   m_l:              {value: 0.916,    unit: dimensionless, ref: "Sze & Ng (2007), conduction-band longitudinal mass (m0)", status: verified}
   m_t:              {value: 0.19,     unit: dimensionless, ref: "Sze & Ng (2007), conduction-band transverse mass (m0)", status: verified}
@@ -31,6 +31,44 @@ parameters:
   ii_a_p_high:      {value: 6.71e5,   unit: 1/cm,          ref: "Van Overstraeten & De Man (1970), E > E0", status: verified}
   ii_b_p_high:      {value: 1.693e6,  unit: V/cm,          ref: "Van Overstraeten & De Man (1970), E > E0", status: verified}
   ii_E0:            {value: 4.0e5,    unit: V/cm,          ref: "Van Overstraeten & De Man (1970), hole-coefficient switch field", status: verified}
+  # --- doping-dependent mobility, Masetti et al., IEEE TED 30, 764 (1983) (As-doped values for electrons,
+  #     B-doped for holes); mu_max = mu_n / mu_p above
+  masetti_n_mumin1: {value: 52.2,   unit: cm**2/V/s, ref: "Masetti et al., IEEE TED 30, 764 (1983), Table I (As)", status: verified}
+  masetti_n_mumin2: {value: 52.2,   unit: cm**2/V/s, ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_mu1:    {value: 43.4,   unit: cm**2/V/s, ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_Pc:     {value: 0.0,    unit: cm**-3,    ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_Cr:     {value: 9.68e16, unit: cm**-3,   ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_Cs:     {value: 3.43e20, unit: cm**-3,   ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_alpha:  {value: 0.68,   unit: dimensionless, ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_n_beta:   {value: 2.0,    unit: dimensionless, ref: "Masetti et al. (1983), Table I (As)", status: verified}
+  masetti_p_mumin1: {value: 44.9,   unit: cm**2/V/s, ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_mumin2: {value: 0.0,    unit: cm**2/V/s, ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_mu1:    {value: 29.0,   unit: cm**2/V/s, ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_Pc:     {value: 9.23e16, unit: cm**-3,   ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_Cr:     {value: 2.23e17, unit: cm**-3,   ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_Cs:     {value: 6.10e20, unit: cm**-3,   ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_alpha:  {value: 0.719,  unit: dimensionless, ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  masetti_p_beta:   {value: 2.0,    unit: dimensionless, ref: "Masetti et al. (1983), Table I (B)", status: verified}
+  # --- doping-dependent SRH lifetime (Scharfetter form tau = tau_max / (1 + (N/N_ref)^gamma))
+  srh_tau_max_n:    {value: 1.0e-5, unit: s,  ref: "Fossum & Lee, Solid-State Electron. 25, 741 (1982), doi:10.1016/0038-1101(82)90203-9; process dependent: calibrate", status: verified}
+  srh_tau_max_p:    {value: 3.0e-6, unit: s,  ref: "Sentaurus default; sources disagree (Fossum & Lee-based sets use up to 4e-4 s): calibrate before use", status: provisional}
+  srh_N_ref:        {value: 1.0e16, unit: cm**-3, ref: "Fossum & Lee (1982), electrons", status: verified}
+  srh_gamma:        {value: 1.0,    unit: dimensionless, ref: "Fossum & Lee (1982): tau = tau0 / (1 + N/Nref)", status: verified}
+  srh_T_exponent:   {value: -1.5,   unit: dimensionless, ref: "tau ~ (300/T)^1.5 as used with Fossum & Lee in Allpix2 / Sentaurus; no single primary measurement", status: provisional}
+  # --- Auger recombination, Dziewior & Schmid, Appl. Phys. Lett. 31, 346 (1977)
+  auger_Cn:         {value: 2.8e-31, unit: cm**6/s, ref: "Dziewior & Schmid, Appl. Phys. Lett. 31, 346 (1977)", status: verified}
+  auger_Cp:         {value: 9.9e-32, unit: cm**6/s, ref: "Dziewior & Schmid (1977)", status: verified}
+  # --- band-gap narrowing, Slotboom form with Klaassen's revised parameters
+  bgn_E0:           {value: 6.92e-3, unit: eV,     ref: "Klaassen, Slotboom & de Graaff, Solid-State Electron. 35, 125 (1992)", status: verified}
+  bgn_N_ref:        {value: 1.3e17,  unit: cm**-3, ref: "Klaassen, Slotboom & de Graaff (1992)", status: verified}
+  bgn_C:            {value: 0.5,     unit: dimensionless, ref: "Klaassen, Slotboom & de Graaff (1992)", status: verified}
+  # --- saturation velocity vs temperature, v_sat = v300 (300/T)^a
+  vsat_n_300:       {value: 1.07e7, unit: cm/s, ref: "Canali et al., IEEE TED 22, 1045 (1975)", status: provisional}
+  vsat_p_300:       {value: 8.37e6, unit: cm/s, ref: "Canali et al. (1975)", status: provisional}
+  vsat_n_T_exponent: {value: 0.87,  unit: dimensionless, ref: "Canali et al. (1975)", status: provisional}
+  vsat_p_T_exponent: {value: 0.52,  unit: dimensionless, ref: "Canali et al. (1975)", status: provisional}
+  # --- impact-ionization temperature factor gamma = tanh(hw/2kT0)/tanh(hw/2kT)
+  ii_hbar_omega:    {value: 0.063,  unit: eV, ref: "Van Overstraeten & De Man (1970), optical-phonon energy", status: verified}
 profiles:
   # Values used by Sandia Charon's built-in "Silicon" material, needed to reproduce Charon decks exactly.
   charon:

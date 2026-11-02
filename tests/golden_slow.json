@@ -143,6 +143,18 @@
     "source": "independent run of the fixed script, 2026-11-01",
     "value": 135.4
   },
+  "simws.axi.let10.collected_drain_fC": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 216.48872363987667
+  },
+  "simws.axi.let10.peak_drain_A": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 0.0049242528613326775
+  },
   "simws.electrothermal.I_5V_A_per_cm": {
     "atol": 0.0,
     "recorded": "2026-11-01",
@@ -178,6 +190,12 @@
     "recorded": "2026-11-01",
     "rtol": 1e-06,
     "value": 41.99547694095871
+  },
+  "simws.physics.DeltaEg_max_meV": {
+    "atol": 0.0,
+    "recorded": "2026-11-02",
+    "rtol": 1e-06,
+    "value": 92.23318975966227
   },
   "simws.seu.let0p1.collected_fC": {
     "atol": 0.0,
