@@ -21,7 +21,10 @@ fit = cal.fit()
 print(fit.table())
 params = {k: {"true": v, "fit": fit.best[k], "ci95": fit.interval_95[k],
               "inside_95": bool(fit.interval_95[k][0] <= v <= fit.interval_95[k][1])} for k, v in truth.items()}
-res = {"parameters": params, "chi2_per_dof": fit.chi2_per_dof, "n_evals": fit.n_evals,
+best = cal.model(fit.best)
+res = {"curves": {"iv_V": ivV.tolist(), "iv_meas_A": data["iv"]["y"].tolist(), "iv_fit_A": np.asarray(best["iv"]).tolist(),
+                  "cv_V": cvV.tolist(), "cv_meas_F": data["cv"]["y"].tolist(), "cv_fit_F": np.asarray(best["cv"]).tolist()},
+       "parameters": params, "chi2_per_dof": fit.chi2_per_dof, "n_evals": fit.n_evals,
        "correlation": fit.correlation.tolist(), "pass": all(p["inside_95"] for p in params.values())}
 write_json(out / "selftest.json", res, stamp())
 if not res["pass"]:

@@ -30,13 +30,14 @@ bash tools/geant4_track/build.sh $E/process_rad
 step "4/9 slow-tier additions, test collection, gitignore"
 grep -q "test_simws_unit_suite_in_tcad_env" tests/test_slow_solvers.py || cat tests/slow_simws_addition.py >> tests/test_slow_solvers.py
 grep -q "test_simws_axisymmetric_seu" tests/test_slow_solvers.py || cat tests/slow_simws_v3_addition.py >> tests/test_slow_solvers.py
-rm -f tests/slow_simws_addition.py tests/slow_simws_v3_addition.py
+grep -q "test_simws_geant4_event_seu" tests/test_slow_solvers.py || cat tests/slow_simws_v4_addition.py >> tests/test_slow_solvers.py
+rm -f tests/slow_simws_addition.py tests/slow_simws_v3_addition.py tests/slow_simws_v4_addition.py
 # unit tests need the tcad env: keep the workflow-env runs from collecting (and skipping) them; the slow tier
 # runs them in tcad with the ini options overridden
 grep -q -- "--ignore=tests/unit" pytest.ini || sed -i 's|^addopts = \(.*\)$|addopts = \1 --ignore=tests/unit|' pytest.ini
 sed -i 's|"-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/unit"\]|"-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "tests/unit"]|' tests/test_slow_solvers.py
 grep -n "^addopts" pytest.ini
-for pat in results/ logs/ .snakemake/ tools/geant4_track/g4track; do grep -qxF "$pat" .gitignore || echo "$pat" >> .gitignore; done
+for pat in results/ logs/ .snakemake/ release/ tools/geant4_track/g4track; do grep -qxF "$pat" .gitignore || echo "$pat" >> .gitignore; done
 
 step "5/9 unit tests (tcad env)"
 PYTHONPATH=. $E/tcad/bin/python -m pytest -q -p no:cacheprovider -rf tests/unit > logs_unit.txt 2>&1 \
@@ -56,6 +57,7 @@ step "7/9 workflow: core results, then studies (sweep + verification)"
 $E/workflow/bin/snakemake -n --cores $CORES -q
 $E/workflow/bin/snakemake --cores $CORES --resources mem_mb=$MEM -q
 $E/workflow/bin/snakemake studies --cores $CORES --resources mem_mb=$MEM -q
+$E/workflow/bin/snakemake paper --cores $CORES --resources mem_mb=$MEM -q
 $E/workflow/bin/python tools/summarize_results.py
 
 step "8/9 slow tier: record golden values for the new checks, then confirm"
@@ -68,8 +70,9 @@ for env in tcad quantum_iii_v process_rad; do
   ~/miniforge3/bin/conda env export -n $env > envs/$env.yml 2>/dev/null
   ~/miniforge3/bin/conda list -n $env --explicit --md5 > envs/$env.explicit.txt
 done
-git add -A simws config workflow pyproject.toml tests pipeline tools docs pytest.ini .gitignore envs/tcad.* envs/quantum_iii_v.* envs/process_rad.*
-git commit -q -m "simws 0.3: full drift-diffusion physics (Masetti mobility, Scharfetter SRH, Auger, consistent band-gap narrowing, temperature dependence), axisymmetric ion strikes at realistic doping, I-V/C-V calibration with uncertainty, off-site backup, MKL opt-in, verified material references" \
+mkdir -p notes && [ -f notes/README.md ] || $E/workflow/bin/python tools/study.py index
+git add -A simws config workflow pyproject.toml tests pipeline tools docs notes pytest.ini .gitignore envs/tcad.* envs/quantum_iii_v.* envs/process_rad.*
+git commit -q -m "simws 0.4: Geant4 event-by-event strikes in DEVSIM, upset-rate engine (CREME96 input), paper figures and methods table, Zenodo release bundles, study log" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push -q && git log --oneline -1
 git remote | grep -qx offsite && git push -q offsite --all && echo "  pushed to offsite" || echo "  (no off-site remote yet: see tools/setup_offsite_backup.sh)"

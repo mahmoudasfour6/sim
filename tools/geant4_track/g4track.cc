@@ -2,7 +2,10 @@
 // Output CSV (per primary): z_lo_um,z_hi_um,r_lo_um,r_hi_um,edep_MeV ; header lines start with '#'.
 //
 //   g4track --Z 26 --A 56 --energy-MeV 1500 --material G4_Si --thickness-um 20 --rmax-um 2 --nr 40 --nz 40
-//           --events 200 --cut-um 0.1 --seed 1 --out track.csv
+//           --events 200 --cut-um 0.1 --seed 1 --out track.csv [--events-out events.csv]
+//
+// --events-out writes every event's own (z, r) deposition, sparse: event,iz,ir,edep_MeV (non-zero bins only;
+// ir = nr is the r >= rmax overflow bin), so each simulated ion can drive its own device simulation.
 //
 // Physics: QBBC hadronic + G4EmStandardPhysics_option4 (most accurate low-energy EM). Serial run manager.
 #include <cmath>
@@ -13,7 +16,10 @@
 #include <string>
 #include <vector>
 
+#include <algorithm>
+
 #include "G4Box.hh"
+#include "G4Event.hh"
 #include "G4EmCalculator.hh"
 #include "G4EmStandardPhysics_option4.hh"
 #include "G4IonTable.hh"
@@ -25,6 +31,7 @@
 #include "G4RunManagerFactory.hh"
 #include "G4Step.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4UserEventAction.hh"
 #include "G4UserSteppingAction.hh"
 #include "G4VUserDetectorConstruction.hh"
 #include "G4VUserPrimaryGeneratorAction.hh"
@@ -36,7 +43,7 @@ struct Args {
   int Z = 26, A = 56, nr = 40, nz = 40, events = 100;
   long seed = 1;
   double energy_MeV = 1500, thickness_um = 20, rmax_um = 2, cut_um = 0.1;
-  std::string material = "G4_Si", out = "track.csv";
+  std::string material = "G4_Si", out = "track.csv", events_out = "";
 };
 
 static Args parse(int argc, char** argv) {
@@ -56,6 +63,7 @@ static Args parse(int argc, char** argv) {
   if (auto v = get("--cut-um")) a.cut_um = std::stod(*v);
   if (auto v = get("--seed")) a.seed = std::stol(*v);
   if (auto v = get("--out")) a.out = *v;
+  if (auto v = get("--events-out")) a.events_out = *v;
   return a;
 }
 
@@ -103,7 +111,21 @@ class Gun : public G4VUserPrimaryGeneratorAction {
 
 class Scorer : public G4UserSteppingAction {
  public:
-  Scorer(const Args& a, const Detector* d) : a_(a), det_(d), h_((a.nr + 1) * a.nz, 0.0) {}
+  Scorer(const Args& a, const Detector* d) : a_(a), det_(d), h_((a.nr + 1) * a.nz, 0.0), ev_((a.nr + 1) * a.nz, 0.0) {
+    if (!a.events_out.empty()) {
+      evf_.open(a.events_out);
+      evf_.precision(8);
+      evf_ << "# g4track per-event deposition; nz=" << a.nz << " nr=" << a.nr << " thickness_um=" << a.thickness_um
+           << " rmax_um=" << a.rmax_um << " ion_Z=" << a.Z << " ion_A=" << a.A << " energy_MeV=" << a.energy_MeV
+           << " cut_um=" << a.cut_um << " seed=" << a.seed << "\n" << "event,iz,ir,edep_MeV\n";
+    }
+  }
+  void EndEvent(int id) {
+    if (evf_.is_open())
+      for (size_t k = 0; k < ev_.size(); ++k)
+        if (ev_[k] > 0) evf_ << id << "," << k / (a_.nr + 1) << "," << k % (a_.nr + 1) << "," << ev_[k] / MeV << "\n";
+    std::fill(ev_.begin(), ev_.end(), 0.0);
+  }
   void UserSteppingAction(const G4Step* s) override {
     const double e = s->GetTotalEnergyDeposit();
     if (e <= 0 || s->GetPreStepPoint()->GetTouchableHandle()->GetVolume()->GetLogicalVolume() != det_->slab()) return;
@@ -116,14 +138,24 @@ class Scorer : public G4UserSteppingAction {
     if (iz < 0 || iz >= a_.nz) return;
     int ir = r >= a_.rmax_um ? a_.nr : static_cast<int>(r / a_.rmax_um * a_.nr);   // last bin = r >= rmax
     h_[iz * (a_.nr + 1) + ir] += e;
+    ev_[iz * (a_.nr + 1) + ir] += e;
   }
   const std::vector<double>& hist() const { return h_; }
   double total() const { return total_; }
  private:
   Args a_;
   const Detector* det_;
-  std::vector<double> h_;
+  std::vector<double> h_, ev_;
   double total_ = 0;
+  std::ofstream evf_;
+};
+
+class EventEnd : public G4UserEventAction {
+ public:
+  explicit EventEnd(Scorer* s) : s_(s) {}
+  void EndOfEventAction(const G4Event* ev) override { s_->EndEvent(ev->GetEventID()); }
+ private:
+  Scorer* s_;
 };
 
 int main(int argc, char** argv) {
@@ -141,6 +173,7 @@ int main(int argc, char** argv) {
   rm->SetUserAction(new Gun(a));
   auto scorer = new Scorer(a, det);
   rm->SetUserAction(scorer);
+  rm->SetUserAction(new EventEnd(scorer));
   rm->Initialize();
   rm->BeamOn(a.events);
 

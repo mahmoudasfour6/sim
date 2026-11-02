@@ -288,3 +288,39 @@ def test_simws_calibration_selftest(tmp_path):
                         tmp_path], REPO, timeout=1800, threads=1, extra_env=_simws_env())
     res = json.loads((tmp_path / "selftest.json").read_text())["results"]
     assert res["pass"], res
+
+
+# --------------------------------------------------------------------------- simws 0.4 (roadmap items 9, 10, 12, 13, 20)
+def test_simws_geant4_event_seu(tmp_path, golden):
+    """Two Geant4 Cl-35 events -> one event-driven axisymmetric strike + Gaussian reference."""
+    if not (ENVS / "process_rad" / "bin" / "geant4-config").exists():
+        pytest.skip("Geant4 not installed in process_rad")
+    run_in_env("process_rad", [env_python("process_rad"), REPO / "workflow" / "scripts" / "geant4_events.py", "--outdir",
+                               tmp_path / "g4", "--ions", "17:35:300", "--events", "2"], REPO, timeout=1200, extra_env=_simws_env())
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "event_seu.py", "--index", tmp_path / "g4" / "index.json",
+                        "--outdir", tmp_path / "seu", "--n-events", "1"], REPO, timeout=2400, threads=1, extra_env=_simws_env())
+    r = next(iter(json.loads((tmp_path / "seu" / "summary.json").read_text())["results"].values()))
+    assert 0.05 < r["collection_efficiency_mean"] < 0.6
+    assert abs(r["gaussian_bias_in_efficiency"]) < 0.3
+    golden.verify({"simws.event.cl35.collected_fC": r["collected_fC_mean"]})
+
+
+def test_simws_ser_engine_and_critical_let(tmp_path):
+    axi = REPO / "results" / "axisymmetric" / "summary.json"
+    if not axi.exists():
+        pytest.skip("run the workflow first (results/axisymmetric)")
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "ser.py", "--axi", axi, "--outdir", tmp_path,
+                        "--qcrit-fC", "20"], REPO, timeout=300, extra_env=_simws_env())
+    r = json.loads((tmp_path / "summary.json").read_text())["results"]
+    assert abs(r["engine_verification"]["rel_diff"]) < 2e-3
+    assert r["critical_let"] and 0.1 < r["critical_let"] < 5
+
+
+def test_simws_figures_build(tmp_path):
+    if not (REPO / "results" / "axisymmetric" / "summary.json").exists():
+        pytest.skip("run the workflow first")
+    run_in_env("tcad", [env_python("tcad"), REPO / "tools" / "make_figures.py", "--out", tmp_path], REPO, timeout=600,
+               extra_env=_simws_env())
+    idx = json.loads((tmp_path / "INDEX.json").read_text())
+    assert len(idx["made"]) >= 6, idx
+    assert (tmp_path / "methods_parameters.tex").exists()

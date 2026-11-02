@@ -28,3 +28,4 @@ results/
 logs/
 .snakemake/
 tools/geant4_track/g4track
+release/

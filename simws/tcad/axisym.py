@@ -114,9 +114,13 @@ class AxiSEUCase:
     physics: Physics = field(default_factory=lambda: Physics(field_mobility=True))
 
 
-def seu_axisymmetric(case: AxiSEUCase = AxiSEUCase(), material=None, progress=None):
+def seu_axisymmetric(case: AxiSEUCase = AxiSEUCase(), material=None, progress=None, deposition=None):
     """Ion strike down the axis of a cylindrical n+/p diode held at V_drain. Returns current transients (A),
-    collected charges (fC) at drain and substrate, deposited charge, and the mesh check of the track."""
+    collected charges (fC) at drain and substrate, deposited charge, and the mesh check of the track.
+
+    `deposition`: optional Geant4 Deposition (one event from simws.radiation.geant4.load_events, or the
+    average) replacing the Gaussian constant-LET track: its own (z, r) energy map drives the generation (same
+    temporal pulse). case.let is then ignored and the deposited charge is the event's."""
     from devsim import get_node_model_values, reset_devsim, set_node_values, set_parameter, solve
     from devsim.python_packages.model_create import CreateSolution
     from simws.materials import load
@@ -143,7 +147,14 @@ def seu_axisymmetric(case: AxiSEUCase = AxiSEUCase(), material=None, progress=No
     r = np.array(get_node_model_values(device="d", region="si", name="x")) / UM
     z = np.array(get_node_model_values(device="d", region="si", name="y")) / UM
     vol = np.array(get_node_model_values(device="d", region="si", name="CylindricalNodeVolume"))  # incl. 2 pi
-    foot, mesh_factor = track.footprint_axisymmetric(mat, r, z, vol)
+    if deposition is None:
+        foot, mesh_factor = track.footprint_axisymmetric(mat, r, z, vol)
+        q_dep_fC = track.total_charge_fC(mat)
+    else:
+        from simws.radiation.geant4 import axisymmetric_footprint
+        from simws.units import Q_E
+        foot, mesh_factor, pairs = axisymmetric_footprint(deposition, mat, r, z, vol)
+        q_dep_fC = pairs * Q_E * 1e15
     set_node_values(device="d", region="si", name="TrackFootprint", values=list(foot))
 
     opts = dict(absolute_error=1e10, relative_error=1e-6, maximum_iterations=40)
@@ -185,7 +196,7 @@ def seu_axisymmetric(case: AxiSEUCase = AxiSEUCase(), material=None, progress=No
     return {
         "case": {k: (v if isinstance(v, (int, float, str)) else str(v)) for k, v in case.__dict__.items()},
         "physics": used, "track_mesh_correction": mesh_factor, "time_step_splits": n_split,
-        "deposited_charge_fC": track.total_charge_fC(mat),
+        "deposited_charge_fC": q_dep_fC, "source": "geant4 event" if deposition is not None else "gaussian track",
         "collected_charge_drain_fC": abs(q_d), "collected_charge_sub_fC": abs(q_s),
         "peak_drain_current_A": float(np.max(np.abs(i_d))), "t_peak_current_s": float(t[np.argmax(np.abs(i_d))]),
         "dc_leakage_drain_A": i0[0],

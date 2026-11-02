@@ -13,3 +13,12 @@ data:
 threads:
   default: 2
   mpi_ranks: 4
+
+# --- single-event studies (simws 0.4)
+seu_qcrit_fC: 2.0            # critical charge of the struck node; default = C_node x V_DD (2 fF x 1 V)
+ser_spectrum: ""             # path to an environment LET spectrum (CREME96 / OMERE output); empty = no rate
+ser_let_unit: "MeV cm2/mg"   # CREME96 LET tables are usually MeV cm2/g: check the file header
+ser_flux_unit: "1/cm2/s/sr"  # e.g. "1/m2/s/sr" for CREME96
+event_ions: "17:35:300,36:84:1000"   # Z:A:E_MeV for the Geant4 event study
+event_count: 20              # Geant4 events per ion
+event_seu_count: 12          # events per ion that each get a DEVSIM run

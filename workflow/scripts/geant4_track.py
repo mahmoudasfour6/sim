@@ -17,7 +17,7 @@ a = ap.parse_args()
 out = Path(a.outdir); out.mkdir(parents=True, exist_ok=True)
 geant4.build(a.prefix)
 csv = geant4.run(out / "deposition.csv", prefix=a.prefix, Z=a.Z, A=a.A, energy_MeV=a.energy_MeV, material="G4_Si",
-                 thickness_um=a.thickness_um, rmax_um=2.0, nr=40, nz=40, events=a.events, cut_um=1.0, seed=1)
+                 thickness_um=a.thickness_um, rmax_um=2.0, nr=200, nz=40, events=a.events, cut_um=1.0, seed=1)
 dep = geant4.load(csv)
 mat = load("silicon")
 z, let = dep.let_profile(mat)

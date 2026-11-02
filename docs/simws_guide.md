@@ -72,6 +72,31 @@ nightly job pushes to it afterwards. MKL PARDISO is opt-in (`SIMWS_DEVSIM_SOLVER
 in tests here it failed on the electrothermal device and did not fix the mixed-mode convergence, so UMFPACK
 stays the default.
 
+## simws 0.4: event-by-event strikes, upset rates, figures, releases, study log
+
+```bash
+W=~/miniforge3/envs/workflow/bin
+$W/snakemake paper --cores 12 --resources mem_mb=20000     # everything + figures -> results/figures
+```
+- **Geant4 events -> DEVSIM** (`geant4_events`, `event_seu` rules): each simulated ion's own (depth, radius) dose
+  is remapped conservatively onto the r-z mesh and drives its own strike; a Gaussian-track run at the same mean
+  LET is the reference. Ions and counts: `event_ions`, `event_count`, `event_seu_count` in config/config.yaml.
+- **Upset rate** (`ser` rule, `simws.radiation.ser`): critical LET from the axisymmetric LET sweep and your
+  critical charge (`seu_qcrit_fC`), step cross section over the drain area, isotropic integration over a LET
+  spectrum. No environment is built in: run CREME96 (or OMERE/SPENVIS) for your orbit and shielding, save the
+  LET spectrum, and set `ser_spectrum`, `ser_let_unit`, `ser_flux_unit` (check the file header for units).
+  The engine is checked against a closed form to 0.1 % on every run.
+- **Figures** (`paper` rule, `tools/make_figures.py`): PDF + 300 dpi PNG + a JSON sidecar with the plotted
+  numbers and the commit that produced them; `methods_parameters.md/.tex` lists every material parameter with
+  value, unit, status and reference.
+- **Release for a paper**: commit, then
+  `$W/python tools/release.py --title "..." --version 1.0 --author "Asfour, Mahmoud|Sabanci University|<ORCID>"`
+  builds `release/<name>.tar.gz` (source at that commit, env lockfiles, results, SHA-256 manifest,
+  CITATION.cff, .zenodo.json). Add `--upload --sandbox` (with `ZENODO_TOKEN`) to try it on sandbox.zenodo.org,
+  `--upload` for the real draft; the DOI is minted only when you press Publish.
+- **Study log**: `python tools/study.py new "question"` starts notes/<date>_<slug>.md (commit recorded);
+  `python tools/study.py link <note> results/.../summary.json` appends the result with its provenance.
+
 ## Single-event upset example
 
 ```python

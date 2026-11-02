@@ -14,7 +14,7 @@ mkdir -p results/nightly
   CORES=$($E/workflow/bin/python -c "import yaml; print(yaml.safe_load(open('config/local_tuning.yaml'))['snakemake']['cores'])" 2>/dev/null || echo 4)
   MEM=$($E/workflow/bin/python -c "import yaml; print(yaml.safe_load(open('config/local_tuning.yaml'))['snakemake']['mem_mb'])" 2>/dev/null || echo 16000)
   echo "== workflow (cores=$CORES mem_mb=$MEM)"
-  $E/workflow/bin/snakemake all studies --cores $CORES --resources mem_mb=$MEM -q 2>&1 | tail -5; wf=${PIPESTATUS[0]}
+  $E/workflow/bin/snakemake paper --cores $CORES --resources mem_mb=$MEM -q 2>&1 | tail -5; wf=${PIPESTATUS[0]}
   echo "== results"; $E/workflow/bin/python tools/summarize_results.py
   if git remote | grep -qx offsite; then
     echo "== off-laptop backup"; git push -q offsite --all 2>&1 | tail -2; echo "  pushed $(git rev-parse --short HEAD)"

@@ -52,6 +52,8 @@ rule studies:
         f"{RES}/verification/electrothermal_mesh.json",
         f"{RES}/verification/particle_strike_dt.json",
         f"{RES}/axisymmetric/summary.json",
+        f"{RES}/geant4_events/seu_summary.json",
+        f"{RES}/ser/summary.json",
 
 
 rule materials_table:
@@ -165,11 +167,11 @@ rule physics_checks:
 rule axisymmetric:
     input: "simws/tcad/axisym.py", "simws/tcad/physics.py", "simws/radiation/track.py"
     output: f"{RES}/axisymmetric/summary.json"
-    threads: 1
-    resources: mem_mb=1500
-    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/axisymmetric", lets=config.get("axi_lets", "1,10,40")
+    threads: min(SWEEP_WORKERS, 6)
+    resources: mem_mb=lambda wc, threads: 400 * threads
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/axisymmetric", lets=config.get("axi_lets", "0.03,0.1,0.3,1,10,40")
     log: "logs/axisymmetric.log"
-    shell: "{params.env} {params.py} workflow/scripts/axisymmetric.py --outdir {params.out} --lets {params.lets} > {log} 2>&1"
+    shell: "{params.env} {params.py} workflow/scripts/axisymmetric.py --outdir {params.out} --lets {params.lets} --workers {threads} > {log} 2>&1"
 
 
 rule calibration_selftest:
@@ -180,3 +182,46 @@ rule calibration_selftest:
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/calibration"
     log: "logs/calibration_selftest.log"
     shell: "{params.env} {params.py} workflow/scripts/calibration_selftest.py --outdir {params.out} > {log} 2>&1"
+
+
+rule geant4_events:
+    input: "tools/geant4_track/g4track.cc", "simws/radiation/geant4.py"
+    output: f"{RES}/geant4_events/index.json"
+    threads: 1
+    resources: mem_mb=1500
+    params: py=py("process_rad"), out=f"{RES}/geant4_events", ions=config.get("event_ions", "17:35:300,36:84:1000"),
+            n=config.get("event_count", 20)
+    log: "logs/geant4_events.log"
+    shell: "{params.py} workflow/scripts/geant4_events.py --outdir {params.out} --ions {params.ions} --events {params.n} > {log} 2>&1"
+
+
+rule event_seu:
+    input: index=f"{RES}/geant4_events/index.json", code="simws/studies/geant4_events.py"
+    output: f"{RES}/geant4_events/seu_summary.json"
+    threads: min(SWEEP_WORKERS, 8)
+    resources: mem_mb=lambda wc, threads: 400 * threads
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/geant4_events/seu", n=config.get("event_seu_count", 12)
+    log: "logs/event_seu.log"
+    shell: "{params.env} {params.py} workflow/scripts/event_seu.py --index {input.index} --outdir {params.out} "
+           "--n-events {params.n} --workers {threads} > {log} 2>&1 && cp {params.out}/summary.json {output}"
+
+
+rule ser:
+    input: axi=f"{RES}/axisymmetric/summary.json", code="simws/radiation/ser.py"
+    output: f"{RES}/ser/summary.json"
+    threads: 1
+    params: py=py("tcad"), out=f"{RES}/ser", q=config.get("seu_qcrit_fC", 2.0), spec=config.get("ser_spectrum", ""),
+            lu=config.get("ser_let_unit", "MeV cm2/mg"), fu=config.get("ser_flux_unit", "1/cm2/s/sr")
+    log: "logs/ser.log"
+    shell: "{params.py} workflow/scripts/ser.py --axi {input.axi} --outdir {params.out} --qcrit-fC {params.q} "
+           "--spectrum '{params.spec}' --let-unit '{params.lu}' --flux-unit '{params.fu}' > {log} 2>&1"
+
+
+# Paper figures (PDF + PNG + data sidecars) and the methods/parameter table, from every result above:
+#   snakemake --cores 12 --resources mem_mb=20000 paper
+rule paper:
+    input: rules.all.input, rules.studies.input
+    output: f"{RES}/figures/INDEX.json"
+    params: py=py("tcad")
+    log: "logs/figures.log"
+    shell: "{params.py} tools/make_figures.py --results {RES} > {log} 2>&1"
