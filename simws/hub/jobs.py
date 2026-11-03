@@ -26,7 +26,7 @@ import numpy as np
 
 from simws.hub import adapter as A
 from simws.hub import gatekeeper
-from simws.hub.canonical import canonical_quantity, job_id, sha256_file
+from simws.hub.canonical import canonical_quantity, job_id, round_sig
 from simws.hub.graph import Graph
 from simws.hub.schema import Budget, JobEnvelope, JobKey, ResultEnvelope
 from simws.hub.store import Store
@@ -34,14 +34,53 @@ from simws.hub.store import Store
 MAX_ATTEMPTS = 3
 
 
-def env_lock(env: str) -> str:
-    """SHA-256 (first 16 hex) of envs/<env>.explicit.txt written by the installer; 'unlocked:<env>' otherwise."""
+# Packages whose version can change a physics result. The environment lock hashes only these (from the conda
+# explicit lock and the pip freeze the installer writes), so updating, say, matplotlib or pydantic does not turn
+# every cached result into a cache miss.
+PHYSICS_PACKAGES = {
+    "python", "numpy", "scipy", "pint", "devsim", "libblas", "libcblas", "liblapack", "liblapacke", "libopenblas",
+    "openblas", "mkl", "suitesparse", "libumfpack", "qe", "quantum-espresso", "libxc", "fftw", "elpa", "openmpi",
+    "mpich", "geant4", "geant4_pybind", "gpaw", "ase", "phonopy", "phono3py", "spglib", "pymatgen", "chgnet", "torch",
+    "scikit-fem", "skfem", "meshio", "chaospy", "salib", "numba", "mpi4py",
+}
+
+
+def _lock_entries(text: str, pip: bool):
+    """(name, version) pairs from a conda explicit lock (URL lines) or a pip freeze."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", "@")):
+            continue
+        if pip:
+            if "==" in line:
+                n, v = line.split("==", 1)
+                out.append((n.strip().lower().replace("_", "-"), v.strip()))
+            continue
+        fname = line.split("#", 1)[0].rsplit("/", 1)[-1]
+        for ext in (".conda", ".tar.bz2"):
+            fname = fname[:-len(ext)] if fname.endswith(ext) else fname
+        parts = fname.rsplit("-", 2)                 # name-version-build
+        if len(parts) == 3:
+            out.append((parts[0].lower().replace("_", "-"), parts[1] + "-" + parts[2]))
+    return out
+
+
+def env_lock(env: str, root=None) -> str:
+    """SHA-256 (first 16 hex) over the physics-relevant packages of envs/<env>.explicit.txt (+ envs/<env>.pip.txt);
+    'unlocked:<env>' when no lock file exists."""
     from simws.config import ROOT, load
-    root = Path(load().get("workspace_root", ROOT))
-    for base in (root, ROOT):
+    from simws.hub.canonical import sha256_text
+    bases = [Path(root)] if root else [Path(load().get("workspace_root", ROOT)), ROOT]
+    for base in bases:
         p = base / "envs" / f"{env}.explicit.txt"
         if p.is_file():
-            return sha256_file(p)[:16]
+            entries = _lock_entries(p.read_text(), pip=False)
+            pp = base / "envs" / f"{env}.pip.txt"
+            if pp.is_file():
+                entries += _lock_entries(pp.read_text(), pip=True)
+            keep = sorted({(n, v) for n, v in entries if n in {x.replace("_", "-") for x in PHYSICS_PACKAGES}})
+            return sha256_text("\n".join(f"{n}=={v}" for n, v in keep))[:16]
     return f"unlocked:{env}"
 
 
@@ -52,13 +91,13 @@ def canonical_value(v: Any) -> Any:
         return canonical_quantity(v[0], v[1])
     if isinstance(v, dict) and set(v) >= {"value", "unit"} and "dims" not in v:
         return canonical_quantity(v["value"], v["unit"])
+    if isinstance(v, dict) and "dims" in v and "value" in v:      # already canonical: re-round (old keys)
+        return {**v, "value": round_sig(v["value"])}
     if isinstance(v, dict):
         return {k: canonical_value(x) for k, x in v.items()}
-    if isinstance(v, np.ndarray):
-        return v.tolist()
-    if isinstance(v, list):
-        return [canonical_value(x) for x in v]
-    return v
+    if isinstance(v, (np.ndarray, list, tuple)):
+        return [canonical_value(x) for x in (v.tolist() if isinstance(v, np.ndarray) else v)]
+    return round_sig(v)
 
 
 def _refs(inputs: Dict[str, Any]) -> List[str]:
@@ -83,7 +122,9 @@ class Hub:
         ad = A.get(name)
         m = ad.manifest
         params = ad.resolve(dict(params or {}))
-        key = JobKey(adapter=m.name, adapter_version=m.version, engine=m.engine, engine_version=m.engine_version,
+        # only the physics version enters the key; the code version is recorded in provenance
+        key = JobKey(adapter=m.name, adapter_version=m.physics_version or m.version, engine=m.engine,
+                     engine_version=m.engine_version,
                      env_lock=env_lock(m.env), inputs=canonical_value(dict(inputs or {})),
                      params=canonical_value(dict(params or {})), member=member, seed=seed)
         # fidelity is part of the key: paper and screening runs of the same inputs are different jobs
@@ -132,6 +173,7 @@ class Hub:
 
     def _commit(self, job: JobEnvelope, res: ResultEnvelope, staging: Path, supersedes=None) -> ResultEnvelope:
         m = A.manifest(job.key.adapter)
+        res.provenance.setdefault("adapter_code_version", m.version)
         res, rep = gatekeeper.apply(job, res, m, staging)
         with self.store.lock():
             res = self.store.finalize(staging, res)
@@ -166,6 +208,62 @@ class Hub:
             if not nxt:
                 return res
             params = {**params, **nxt.pop(0)}
+        return res
+
+    def submit_members(self, name: str, members: Dict[str, Dict[str, Any]], params=None, inputs=None,
+                       fidelity="screening", budget: Optional[Budget] = None, priority="interactive") -> List[ResultEnvelope]:
+        """Run an ensemble. members = {member id: param overrides}, e.g. from uncertainty.member_id(...).
+        Adapters with manifest.batch_members run all members as ONE job (one process, one commit); others run one
+        job per member. Either way every quantity carries its member ID, so Ensemble.from_quantities works."""
+        m = A.manifest(name)
+        if m.batch_members:
+            p = {**dict(params or {}), A.MEMBERS_KEY: {k: dict(v) for k, v in members.items()}}
+            return [self.submit(name, p, inputs, member="batch", fidelity=fidelity, budget=budget, priority=priority)]
+        return [self.submit(name, {**dict(params or {}), **ov}, inputs, member=mid, fidelity=fidelity, budget=budget,
+                            priority=priority) for mid, ov in sorted(members.items())]
+
+    # ------------------------------------------------------------------ sketch mode
+    def sketch(self, func, params=None, name: Optional[str] = None) -> ResultEnvelope:
+        """Run any Python function as a flagged job: no manifest, keyed on the function's source and the params.
+        func(**params) returns {quantity name: (value, unit)}. Results carry the flag 'sketch' and the graph
+        records them like any other result; paper fidelity refuses them. Promote a sketch that survives by writing
+        an adapter."""
+        import inspect
+        from simws.hub.canonical import sha256_text
+        from simws.hub.schema import Quantity
+        try:
+            src = inspect.getsource(func)
+        except (OSError, TypeError):
+            src = getattr(func, "__qualname__", repr(func))
+        label = f"sketch.{name or func.__name__}"
+        cparams = canonical_value(dict(params or {}))
+        key = JobKey(adapter=label, adapter_version=sha256_text(src)[:12], engine="python", engine_version=sys.version.split()[0],
+                     env_lock="sketch", params=cparams)
+        jid = job_id({"key": key.model_dump(), "fidelity": "screening"})
+        job = JobEnvelope(id=jid, key=key, env="local")
+        cached = self.graph.result_for_job(jid)
+        if cached and self.store.has(cached):
+            r = self.store.envelope(cached); r.diagnostics.setdefault("cache", "hit"); return r
+        staging = self.store.staging(jid)
+        (staging / "job.json").write_text(job.model_dump_json(indent=1))
+        try:
+            out = func(**dict(params or {}))
+            qs = []
+            for qn, v in out.items():
+                if isinstance(v, Quantity):
+                    qs.append(v)
+                else:
+                    val, unit = v
+                    qs.append(Quantity(name=qn, value=val, unit=unit, source=label, flags=["sketch"]))
+            res = ResultEnvelope(job_id=jid, status="ok", quantities=qs, flags=["sketch"], provenance={"source": src})
+        except Exception as exc:  # noqa: BLE001
+            res = ResultEnvelope(job_id=jid, status="engine_error", flags=["sketch"], message=f"{type(exc).__name__}: {exc}")
+        from simws.hub.schema import Manifest
+        man = Manifest(name=label, version=key.adapter_version, env="local", engine="python")
+        res, rep = gatekeeper.apply(job, res, man, staging)
+        with self.store.lock():
+            res = self.store.finalize(staging, res)
+            self.graph.commit_result(job, res)
         return res
 
     # ------------------------------------------------------------------ queries

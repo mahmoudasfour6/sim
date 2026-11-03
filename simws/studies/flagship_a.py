@@ -68,7 +68,33 @@ def fit_models(T, ratio):
     return out
 
 
-def run(outdir, spec=None, hub=None, log=print) -> dict:
+def fit_edge_plus_graded(T, ratio, dEg_edge):
+    """H1 follow-up: the ratio is exp(dEg_edge/kT) (Ge already present at the emitter edge of the NEUTRAL base,
+    taken from the device at each T, not fitted) times the graded-base factor A x/(1 - e^-x) of the remaining
+    grade. Fits A and the remaining grade dE; a small residual with one dE at every T supports the explanation."""
+    T, r, e = (np.asarray(v, float) for v in (T, ratio, dEg_edge))
+    y = np.log(r) - e / (K_B_EV * T)
+    best = None
+    for dE in np.linspace(0.001, 0.4, 4000):
+        g = np.log(graded_form(T, 1.0, dE))
+        lnA = float(np.mean(y - g))
+        rms = float(np.sqrt(np.mean((g + lnA - y) ** 2)))
+        if best is None or rms < best[2]:
+            best = (math.exp(lnA), float(dE), rms)
+    return {"A": best[0], "dE_grade_remaining_eV": best[1], "rms_log_resid": best[2],
+            "dEg_edge_eV": e.tolist()}
+
+
+def _submit_one(store_root, adapter, params, fidelity):
+    """Worker thread: its own Hub (SQLite connections must not cross threads); every job still runs in its own
+    adapter process, and commits are serialised by the store's flock."""
+    from simws.hub.jobs import Hub
+    return Hub(store_root).submit(adapter, params=params, priority="batch", fidelity=fidelity).id
+
+
+def run(outdir, spec=None, hub=None, log=print, workers: int = 1) -> dict:
+    """workers > 1 submits the (T, device) jobs from that many threads at once (each job is its own isolated
+    adapter process anyway); results are then read back from the store, so the analysis is identical."""
     from simws.hub.jobs import Hub
     s = load_spec(spec) if not isinstance(spec, dict) else spec
     hub = hub or Hub()
@@ -77,11 +103,30 @@ def run(outdir, spec=None, hub=None, log=print) -> dict:
     V = np.round(np.arange(sw["VBE_V"]["start"], sw["VBE_V"]["stop"] + 1e-9, sw["VBE_V"]["step"]), 6)
     lo, hi = s["validity"]["trusted_T_K"]
     rows, raw = [], {}
+    fid = s.get("fidelity", "screening")
+
+    def params_for(T, d):
+        p = {"case": d["case"], "VBE": (V, "V"), "T": (float(T), "K"), "keep_partial": True}
+        if s.get("physics", {}).get("cryo"):
+            p.update(cryo=True, neutral_base_edge=True)       # 0.9a cryogenic core (spec version 2)
+        if sw.get("IC_max_A_per_m"):
+            p["IC_max_A_per_m"] = float(sw["IC_max_A_per_m"])
+        return p
+
+    done = {}
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        # coldest first: they take longest
+        todo = [(T, dev, d) for T in sorted(sw["T_K"]) for dev, d in s["devices"].items()]
+        with ThreadPoolExecutor(workers) as ex:
+            futs = {(T, dev): ex.submit(_submit_one, str(hub.store.root), d["adapter"], params_for(T, d), fid)
+                    for T, dev, d in todo}
+            for k, f in futs.items():
+                done[k] = hub.store.envelope(f.result())
     for T in sw["T_K"]:
         per = {}
         for dev, d in s["devices"].items():
-            r = hub.submit(d["adapter"], params={"case": d["case"], "VBE": (V, "V"), "T": (float(T), "K"),
-                                                 "keep_partial": True}, priority="batch")
+            r = done.get((T, dev)) or hub.submit(d["adapter"], params=params_for(T, d), priority="batch", fidelity=fid)
             per[dev] = r
             log(f"  T={T:>5} K {dev:9s} {r.status:15s} {', '.join(r.flags)[:110]}")
         raw[T] = per
@@ -110,6 +155,10 @@ def run(outdir, spec=None, hub=None, log=print) -> dict:
             if ra and rb:
                 row["IC_ratio"] = ra / rb
                 row["IC_ratio_VBE"] = float(vc)
+            if "hbt.dEg_ge_nb_edge" in {q.name for q in a.quantities}:
+                row["sige_hbt.dEg_ge_nb_edge_eV"] = float(np.interp(vc, va, a.q("hbt.dEg_ge_nb_edge").array()))
+                row["sige_hbt.ge_nb_edge"] = float(np.interp(vc, va, a.q("hbt.ge_nb_edge").array()))
+                row["sige_hbt.y_nb_edge_um"] = float(np.interp(vc, va, a.q("hbt.y_nb_edge").array()))
         rows.append(row)
     trusted = [r for r in rows if r["trusted"] and "IC_ratio" in r]
     fits = fit_models([r["T_K"] for r in trusted], [r["IC_ratio"] for r in trusted]) if len(trusted) >= 3 else {}
@@ -118,7 +167,15 @@ def run(outdir, spec=None, hub=None, log=print) -> dict:
         g = fits["graded_form"]
         for r in allr:
             r["IC_ratio_graded_model"] = float(graded_form(r["T_K"], g["A"], g["dE_grade_eV"]))
+    fit_lo, fit_hi = s["validity"].get("fit_T_K", [lo, hi])
+    wide = [r for r in allr if fit_lo <= r["T_K"] <= fit_hi]
+    fits_wide = fit_models([r["T_K"] for r in wide], [r["IC_ratio"] for r in wide]) if len(wide) >= 3 else {}
+    edge = [r for r in wide if "sige_hbt.dEg_ge_nb_edge_eV" in r]
+    if len(edge) >= 3:
+        fits_wide["edge_plus_graded"] = fit_edge_plus_graded([r["T_K"] for r in edge], [r["IC_ratio"] for r in edge],
+                                                             [r["sige_hbt.dEg_ge_nb_edge_eV"] for r in edge])
     res = {"spec": s["id"], "version": s["version"], "fidelity": s["fidelity"], "rows": rows, "fits_trusted_window": fits,
+           "fits_fit_window": fits_wide, "fit_window_T_K": [fit_lo, fit_hi],
            "graph": {"nodes": hub.graph.to_networkx().number_of_nodes()}}
     (out / "flagship_a.json").write_text(json.dumps(res, indent=1, default=float))
     _table(rows, out / "flagship_a_table.txt")

@@ -52,3 +52,23 @@ line("Geant4 O-16 100 MeV LET", lambda: (lambda r: f"{r['meta']['entrance_LET_Me
 line("Sobol T_max (total order)", lambda: ", ".join(f"{k} {v['ST']:.2f}" for k, v in get("sweeps/electrothermal_sobol/summary.json", "T_max_K", "sobol").items()))
 line("mesh convergence T_max", lambda: (lambda r: f"p = {r['order']:.2f}, GCI {100 * r['gci_fine']:.1e} %")(get("verification/electrothermal_mesh.json")))
 line("time-step convergence strike", lambda: (lambda r: f"p = {r['order']:.2f}, GCI {100 * r['gci_fine']:.1e} %" if r["order"] else (f"noise-level, bound {100 * r['gci_fine']:.1e} %" if r["gci_fine"] else "; ".join(r["notes"])))(get("verification/particle_strike_dt.json")))
+
+
+def raw(path):
+    p = R / path
+    if not p.exists():
+        raise NotRun
+    return json.loads(p.read_text())
+
+
+def _flagship(r):
+    rows = {x["T_K"]: x for x in r["rows"]}
+    b = lambda T, d: (lambda v: f"{v:.0f}" if v else "-")(rows.get(T, {}).get(f"{d}.beta_at_JC"))
+    gf = (r.get("fits_fit_window") or {}).get("edge_plus_graded") or {}
+    return (f"v{r['version']}: beta(1 A/m) SiGe {b(77, 'sige_hbt')}/{b(300, 'sige_hbt')}/{b(400, 'sige_hbt')}, "
+            f"Si {b(77, 'si_bjt')}/{b(300, 'si_bjt')}/{b(400, 'si_bjt')} at 77/300/400 K"
+            + (f"; H1b remaining grade {1e3 * gf['dE_grade_remaining_eV']:.0f} meV, rms {gf['rms_log_resid']:.3f}" if gf else ""))
+
+
+line("flagship A (SiGe HBT 77-400 K)", lambda: _flagship(raw("flagship_a/flagship_a.json")))
+line("0.9a cryogenic gate", lambda: (lambda r: f"pass={r['pass']}; " + ", ".join(f"{k} {r[k]['pass']}" for k in ("checks", "devices", "mesh") if k in r))(raw("cryo_gate/cryo_gate.json")))

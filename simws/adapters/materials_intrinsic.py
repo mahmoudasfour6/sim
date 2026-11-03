@@ -14,7 +14,7 @@ from simws.hub.schema import Manifest, OutputSpec, PhysicsEdge
 
 class Intrinsic(Adapter):
     manifest = Manifest(
-        name="materials.intrinsic", version="1.0", env="workflow", engine="simws.materials", engine_version="0.8",
+        name="materials.intrinsic", version="1.0", env="workflow", batch_members=True, engine="simws.materials", engine_version="0.8",
         description="Intrinsic carrier density and band gap versus temperature from the material set",
         inputs=["material", "T"],
         outputs=[OutputSpec(name="mat.n_i", unit="cm**-3", constraint="positive"),

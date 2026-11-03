@@ -424,3 +424,30 @@ def test_simws_pseudodojo_vs_bundled(tmp_path, golden):
     assert r["pass"], r
     golden.verify({"simws.hub.dft.pseudodojo.PBE.m_l": r["pseudos.dft.m_l"]["pseudodojo"],
                    "simws.hub.dft.pseudodojo.PBE.m_t": r["pseudos.dft.m_t"]["pseudodojo"]})
+
+
+# --------------------------------------------------------------------------- simws 0.9a (cryogenic core)
+def test_simws_cryo_gate(tmp_path, golden):
+    """0.9a gate: closed-form cryogenic checks, HBT/BJT convergence 77-400 K (flagship A v2), paper-fidelity
+    mesh error bars."""
+    flag = REPO / "results" / "flagship_a" / "flagship_a.json"
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "cryo_gate.py", "--outdir", tmp_path,
+                        "--flagship", flag], REPO, timeout=4 * 3600, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "cryo_gate.json").read_text())
+    assert r["pass"], r
+    ch = r["checks"]
+    golden.verify({"simws.cryo.fd_statistics_error": ch["statistics_error"]["max_density_error"]})
+
+
+def test_simws_charon_xcheck():
+    """0.9a gate: DEVSIM vs Charon on a cold pn diode within 2 % (needs Charon on this laptop:
+    tools/run_charon_xcheck.sh writes the comparison files)."""
+    import pathlib as _pl
+    import pytest as _pt
+    d = _pl.Path.home() / "sim_workspace" / "runs" / "charon_xcheck"
+    files = sorted(d.glob("comparison_T*.json"))
+    if not files:
+        _pt.skip("no Charon comparison yet: run bash tools/run_charon_xcheck.sh")
+    for f in files:
+        r = json.loads(f.read_text())
+        assert r["pass"], (f.name, r["worst_rel_diff"], r.get("hint"))

@@ -21,7 +21,7 @@ from simws.hub.schema import JobEnvelope, ResultEnvelope, now_utc
 
 NODE_TYPES = {"Job", "Result", "Quantity", "MaterialLaw", "Dataset", "Model", "Study"}
 EDGE_TYPES = {"produced", "consumed", "depends_on", "uses_model", "validated_against", "calibrated_on",
-              "checked_by", "supersedes"}
+              "checked_by", "supersedes", "equivalent_to"}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT, data TEXT, created TEXT);
@@ -93,6 +93,23 @@ class Graph:
                 self.event("stale", supersedes, {"superseded_by": res.id}, cur)
             self.event("committed" if res.status == "ok" else "failed", res.id,
                        {"job": job.id, "adapter": job.key.adapter, "status": res.status}, cur)
+            cur.execute("COMMIT")
+        except Exception:
+            cur.execute("ROLLBACK")
+            raise
+
+    def alias_job(self, new_job, result_id: str, old_job_id: str):
+        """Serve an existing result for a new job key (canary-verified relinking after an upgrade)."""
+        cur = self.db.cursor()
+        cur.execute("BEGIN")
+        try:
+            self._node(cur, new_job.id, "Job", new_job.key.adapter,
+                       {"key": new_job.key.model_dump(), "fidelity": new_job.fidelity, "alias_of": old_job_id})
+            cur.execute("INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?)",
+                        (new_job.id, result_id, "ok", new_job.key.adapter, new_job.key.member, new_job.fidelity,
+                         now_utc()))
+            self._edge(cur, new_job.id, old_job_id, "equivalent_to")
+            self.event("relinked", result_id, {"new_job": new_job.id, "old_job": old_job_id}, cur)
             cur.execute("COMMIT")
         except Exception:
             cur.execute("ROLLBACK")

@@ -3,8 +3,12 @@ the last converged solution), grow it again after successes."""
 from __future__ import annotations
 
 
-def ramp_bias(device, contact, target, step=0.1, min_step=1e-4, max_step=None, callback=None, **solve_opts):
-    """Ramp contact `contact` to `target` volts. `callback(v)` runs after every converged point.
+def ramp_bias(device, contact, target, step=0.1, min_step=1e-4, max_step=None, callback=None,
+              retry_callback=False, **solve_opts):
+    """Ramp contact `contact` to `target` volts. `callback(v)` runs after every converged point; an exception from
+    it propagates (callers use that to stop a ramp, e.g. past breakdown). With retry_callback=True a callback
+    failure instead counts as a failed point and the step is halved (an outer iteration such as the Klaassen
+    mobility that can itself fail to converge).
     Raises RuntimeError if the step falls below min_step (e.g. at avalanche breakdown); the device is left
     at the last converged bias, which is returned in the exception's `.last_bias` attribute."""
     from devsim import get_parameter, set_parameter, solve
@@ -21,6 +25,8 @@ def ramp_bias(device, contact, target, step=0.1, min_step=1e-4, max_step=None, c
         set_parameter(device=device, name=name, value=v_try)
         try:
             solve(**opts)
+            if callback and retry_callback:        # an outer iteration (e.g. Klaassen mobility) can fail too
+                callback(v_try)
         except Exception:
             set_parameter(device=device, name=name, value=v)
             try:
@@ -34,7 +40,7 @@ def ramp_bias(device, contact, target, step=0.1, min_step=1e-4, max_step=None, c
                 raise err
             continue
         v = v_try
-        if callback:
+        if callback and not retry_callback:
             callback(v)
         h = min(max_step, h * 1.5)
     return v

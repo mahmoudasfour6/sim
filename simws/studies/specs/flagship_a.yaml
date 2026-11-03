@@ -1,6 +1,8 @@
-# Flagship study A: the temperature window of a SiGe HBT, 77-400 K (simws 0.8 screening; paper fidelity in 0.9+).
+# Flagship study A: the temperature window of a SiGe HBT, 77-400 K.
+# Version 2 (simws 0.9a): cryogenic core on (freeze-out, Fermi-Dirac, Klaassen, FD-consistent BGN), neutral-base-edge
+# diagnostic for the H1 follow-up. The 0.8 run is reproducible from flagship_a_v08.yaml (version 1).
 id: flagship_a
-version: 1
+version: 2
 question: >
   How do current gain, collector-current enhancement and the turn-on voltage of a graded-base SiGe HBT change from
   liquid-nitrogen to hot-ambient temperature, compared with an identical Si BJT, and which physical mechanism
@@ -17,6 +19,13 @@ hypotheses:
     statement: Si BJT gain falls on cooling while SiGe HBT gain rises, because emitter band-gap narrowing works
       against the Si device and the base Ge grading for the SiGe device.
     observable: hbt.beta at fixed collector current density
+  - id: H1b
+    statement: >
+      (0.9a follow-up of the rejected H1) The ratio is exp(dEg_edge/kT) x A x/(1 - exp(-x)): the emitter-base
+      depletion moves the emitter edge of the neutral base into Ge-containing material, so an abrupt offset
+      dEg_edge (read from the device at each T, not fitted) multiplies the graded-base factor of the remaining grade.
+    mechanism: Ge fraction at the neutral-base edge (depletion-width dependent) plus the residual grading field.
+    observable: hbt.IC ratio and hbt.dEg_ge_nb_edge; one remaining-grade dE must fit every T with a small residual
   - id: H3
     statement: The collector-current slope stays ideal (n = 1) across the window; departures mark the onset of
       high injection or of the extrapolated physics below 250 K.
@@ -24,17 +33,22 @@ hypotheses:
 devices:
   si_bjt:  {adapter: devsim.hbt_gummel, case: {ge_peak: 0.0}}
   sige_hbt: {adapter: devsim.hbt_gummel, case: {ge_peak: 0.15}}
+physics:
+  cryo: true                   # 0.9a: Altermatt freeze-out, Fermi-Dirac (Nilsson), Klaassen mobility
 sweep:
   T_K: [77, 150, 200, 250, 300, 350, 400]
   VBE_V: {start: 0.40, stop: 1.10, step: 0.05}
+  IC_max_A_per_m: 1000.0       # v2: the sweep ends once IC exceeds 1 mA/um (high injection / Kirk effect); at 77 K
+                               # the SiGe device gets there near 1.05 V, and 1.1 V is beyond flat band
 compare_at:
   VBE_V: 0.60                  # for the enhancement ratio (cold devices: the lowest common bias above the current floor)
   JC_A_per_m: 1.0              # collector current per m of emitter length for beta (1 uA/um)
 validity:
   # from the adapter manifest and the material laws: mobility T laws 200-500 K, n_i(T) 250-400 K
-  trusted_T_K: [250, 400]
-  note: below 250 K results are produced but flagged 'extrapolated'; 77 K additionally needs freeze-out and
-        low-temperature mobility models that 0.8 does not have (planned for the cryogenic package)
+  trusted_T_K: [250, 400]      # the 0.8 window (fits kept for comparison)
+  fit_T_K: [77, 400]           # cryogenic core on: fits over the whole window
+  note: below 250 K results keep the adapter's 'extrapolated' and 'cryo_unvalidated' flags (the cryogenic core is
+        checked against closed forms and Charon, not against measured devices)
 fidelity: screening
 uncertainty:
   screening: none (results flagged 'unverified')

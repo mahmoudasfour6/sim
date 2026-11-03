@@ -219,7 +219,9 @@ class OutputSpec(_M):
 
 class Manifest(_M):
     name: str
-    version: str
+    version: str                                # code version (log text, refactors): provenance only
+    physics_version: Optional[str] = None       # enters the job key; None = same as version (0.8 behaviour)
+    batch_members: bool = False                 # cheap adapters: all ensemble members in one job
     env: str
     engine: str
     engine_version: str = "unknown"

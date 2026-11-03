@@ -61,6 +61,30 @@ def _jn_intrinsic(case, x_cut_um=0.1):
     return float(np.mean(np.abs(J[sel])))
 
 
+def _neutral_base_edge(case, x_cut_um=0.1):
+    """Emitter-side edge of the neutral base on the intrinsic vertical cut at the present bias: the first node
+    (from the emitter) where the hole density reaches half its base maximum. Returns (y_edge_um, Ge fraction,
+    Ge-induced effective gap reduction dEg_eff = dEc + dEv - DeltaEg in eV, i.e. n_ie^2 grows as exp(dEg_eff/kT)
+    there, DOS-ratio terms included; then the change of each across the bracketing mesh cell)."""
+    from devsim import get_node_model_values, get_node_model_list
+    g = lambda k: np.array(get_node_model_values(device="d", region="si", name=k))
+    x, y = g("x") / UM, g("y") / UM
+    xs = np.unique(np.round(x, 6))
+    xc = xs[np.argmin(np.abs(xs - x_cut_um))]
+    sel = (np.abs(x - xc) < 1e-6) & (y > case.t_e) & (y < case.t_e + case.w_b)
+    o = np.argsort(y[sel])
+    yy, p = y[sel][o], g("Holes")[sel][o]
+    gap = (g("dEc") + g("dEv") - g("DeltaEg"))[sel][o]
+    ge = g("GeX")[sel][o] if "GeX" in get_node_model_list(device="d", region="si") else np.zeros_like(yy)
+    k = int(np.argmax(p >= 0.5 * p.max()))
+    if k == 0:
+        return float(yy[0]), float(ge[0]), float(gap[0]), float(yy[1] - yy[0]), float(ge[1] - ge[0]), float(gap[1] - gap[0])
+    f = (0.5 * p.max() - p[k - 1]) / (p[k] - p[k - 1])        # linear between the bracketing nodes
+    lerp = lambda a: float(a[k - 1] + f * (a[k] - a[k - 1]))
+    step = lambda a: float(a[k] - a[k - 1])                   # change across the bracketing cell (uncertainty)
+    return lerp(yy), lerp(ge), lerp(gap), step(yy), step(ge), step(gap)
+
+
 def collector_enhancement(VBE=(0.5, 0.6, 0.65), ge_peak=0.15):
     """Ratio of the intrinsic-base electron current density (SiGe / Si) vs Moll-Ross on the same cut; the terminal
     current ratio is reported too (it is a few % lower: the emitter periphery injects into Ge-free silicon)."""

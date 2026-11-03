@@ -237,6 +237,114 @@ Every calculation now has an identity, a home and a history. `notebooks/hub_tour
 - Not covered yet: strain and dose in the material laws (0.12), the field store with conservative transfer, paper
   fidelity for devices (mesh-refinement GCI per result), freeze-out and low-temperature mobility (cryogenic package).
 
+## simws 0.9a: hub fixes and the cryogenic core
+
+`notebooks/cryo_tour.ipynb` walks through it. Nothing below changes a 0.8 result: every new model is off unless
+asked for, and the 0.8 unit, connection and slow tests still pass against their golden values.
+
+- **Hub fixes.**
+  - Job keys round floats to 12 significant digits, so 300.0000000000001 K is 300 K.
+  - The environment lock hashes only physics packages (`envs/<env>.explicit.txt` plus `envs/<env>.pip.txt`), so
+    a new Jupyter does not invalidate the store.
+  - `Manifest.physics_version` enters the key, while the code version only goes into provenance.
+  - Cheap adapters run whole ensembles as one job (`batch_members`).
+  - The store refuses network and Windows file systems (`/mnt/c`, 9p, nfs). Override with
+    `SIMWS_STORE_ALLOW_UNSAFE=1`.
+  - `hub.sketch(func, params, name)` stores quick explorations flagged `sketch`. Paper fidelity refuses them.
+  - The coupling registry (`simws.hub.coupling`) enforces that two-way couplings live inside one adapter.
+- **Canary relinking.** After an upgrade changes job keys, run `python -m simws.hub.relink`. It reruns two
+  canaries per adapter (one for DFT, which must agree to 1e-6) and links every other result to its new key
+  (`equivalent_to` edge, `relinked` event) when the canaries reproduce to 1e-9. When a canary differs, nothing of
+  that adapter is linked, and those results are recomputed when next requested. The installer runs it.
+- **Cryogenic core** (`Physics(incomplete_ionization=True, fermi_dirac=True, mobility="klaassen")`;
+  `HBTCase(cryo=True)`; `devsim.hbt_gummel` param `cryo`):
+  - **Freeze-out.** Altermatt 2006 (P, As, B): the ionization energy falls with doping and the bound fraction
+    vanishes at the Mott transition. `ii_model="charon"` gives Charon's constant-energy form for cross-checks.
+  - **Fermi–Dirac statistics** through the degeneracy factor γ, using Nilsson's inverse (density error at most
+    0.49 %, recorded as a model error). The factor enters:
+    - the space charge;
+    - the Scharfetter–Gummel currents, which use the generalized Einstein relation, ψ + ΔEc + V_t ln γn;
+    - the contacts;
+    - SRH and Auger recombination, whose equilibrium is n·p = γn·γp·n_ie².
+  - **Band-gap narrowing with FD.** Slotboom's narrowing is apparent (fitted with Boltzmann statistics), so with
+    FD the physical value −kT ln γ(300 K) of the majority carriers is used. Without this, degeneracy is counted
+    twice and a cold Si BJT shows an unphysical gain of about 230.
+  - **Klaassen 1992 mobility**: lattice, impurity, carrier–carrier scattering and clustering. It depends on the
+    carriers, so after every bias point it is iterated to self-consistency (`relax_mobility`). The iteration is
+    damped and restartable: a failed Newton solve restores the state and halves the update, and the converged
+    state does not depend on this.
+  - **Band parameters.** Green's Nc and Nv are scaled together so that the Boltzmann limit is exactly the 0.8
+    n_i(T).
+  - **Extended precision** (DEVSIM 80-bit) is on automatically for cryo devices below 200 K. Minority densities
+    there fall below 1e-300 cm⁻³, and in double precision the SiGe HBT Newton iteration stalls at 77 K. Results
+    are identical where both converge.
+  - **Current-bounded sweeps.** The Gummel adapter's `IC_max_A_per_m` ends the sweep once IC (or the
+    ideal-slope prediction for the next point) passes the limit, and flags `sweep_stopped`. At 77 K, 0.05 V is a
+    factor of about 1800 in current.
+- **Checks** (`simws.validation.cryo_checks`; `tests/unit/test_cryo.py`; rule `cryo_gate`):
+
+  | Check | Result | Gate |
+  |---|---|---|
+  | Freeze-out in a uniform bar vs the local-neutrality solution | 5e-13 | 1e-6 |
+  | Small-bias current vs q n μ V/L with Klaassen | 1.5e-12 | 1e-4 |
+  | Zero-bias current on a bar graded from 1e15 to 1e20 cm⁻³, degenerate end, 77 and 300 K, relative to the drift scale (Einstein relation / detailed balance) | 3e-13 | 1e-10 |
+  | Asymmetry of the conductance matrix of a three-contact bar (Onsager reciprocity) | passes at 300 K (77 K runs in `cryo_gate`) | 1e-6 |
+
+  The HBT adapter also refuses a result whose zero-bias terminal current is above the noise floor.
+- **Charon cross-check**: `bash tools/run_charon_xcheck.sh`, which runs on the laptop.
+  - What it runs: a cold pn diode (1e17/1e17 cm⁻³, 77 K and 300 K) on Charon's own `pndiode.exo` mesh, with
+    CVFEM-SG. Our band parameters are written into the Charon deck, and both codes use Charon's
+    incomplete-ionization form, fixed mobilities and SRH.
+  - Gate: terminal current density (above 1e-6 A/cm²) and neutral-region majority densities within 2 %.
+  - Results land in `~/sim_workspace/runs/charon_xcheck/comparison_T*.json`.
+- **Paper fidelity for devices.** `devsim.hbt_gummel` at `fidelity="paper"` runs three meshes (spacings ×1,
+  1/√2 and ½). Each quantity gets a numerical uncertainty (`components.numerical`) and `verification["mesh"]` per
+  bias point. The gatekeeper requires both.
+  - The GCI of the finest mesh is used only when the observed order lies between 0.5 and 4 and the meshes are
+    near the asymptotic range.
+  - Otherwise the uncertainty is a conservative bound, Fs |f1 − f2| / (r^0.5 − 1) / k, and the result is flagged
+    `mesh_not_asymptotic`.
+  - `simws.verify.analyse` now also refuses to report a GCI when the differences do not shrink with refinement.
+    Before, it returned a negative one.
+  - **Finding:** the HBT mesh used since 0.6 is not converged.
+    - At 300 K, IC drops 0.9 % and IB 4–5 % per √2 refinement, with no clean order.
+    - So paper-fidelity σ is about 3 % on IC and 8–12 % on IB and β.
+    - Ratios such as SiGe/Si cancel most of it (Moll–Ross 0.05 %).
+    - The likely source is current crowding at the emitter-contact corner. Mesh grading there (gmsh) is a
+      0.9b item.
+- **Flagship A v2** (`specs/flagship_a.yaml`; the 0.8 run is `specs/flagship_a_v08.yaml`):
+  - Uses the cryogenic core from 77 to 400 K, submits jobs in parallel (`--workers`; the rule uses 6), and stops
+    sweeps at 1 mA/µm.
+  - New quantities `hbt.y_nb_edge`, `hbt.ge_nb_edge` and `hbt.dEg_ge_nb_edge`: the emitter edge of the neutral
+    base, its Ge fraction and its Ge-induced gap reduction.
+  - The H1 follow-up fits ratio = exp(ΔEg_edge/kT) × A x/(1 − e⁻ˣ), with ΔEg_edge read from the device at each
+    temperature, not fitted.
+  - Result of the first full run: every temperature from 77 to 400 K converges for both devices, with no
+    partial sweeps.
+  - **Current gain at 1 A/m** (1 µA per µm of emitter) falls with cooling for the Si BJT and rises for the SiGe
+    HBT, as H2 states:
+
+    | T (K) | 77 | 150 | 200 | 250 | 300 | 350 | 400 |
+    |---|---|---|---|---|---|---|---|
+    | Si BJT β | 2.1 | 5.0 | 7.7 | 11 | 15 | 19 | 24 |
+    | SiGe HBT β | 298 | 106 | 88 | 81 | 79 | 79 | 80 |
+    | IC ratio (SiGe/Si) | 348 | 39 | 17 | 9.4 | 5.8 | 4.1 | 3.1 |
+
+    The IC ratio is taken at 0.95, 0.75 and 0.65 V at 77, 150 and 200 K, and at 0.6 V from 250 K up.
+  - **Within 250–400 K** the ratio again follows B exp(dE/kT) with dE = 63 meV (rms 0.006), the same as 0.8.
+  - **Over the whole 77–400 K window**, neither single form holds: graded only gives rms 0.99, exp only gives
+    rms 0.25.
+  - **H1b fits** with rms 0.018: exp(ΔEg_edge/kT) × 1.10 x/(1 − e⁻ˣ). Here ΔEg_edge is 14–28 meV (Ge fraction
+    0.037–0.049 at the edge) and the remaining grade is 49 meV.
+  - The value of ΔEg_edge matches the material model: 0.75 eV × 0.047 minus the DOS term 0.49 kT gives 22 meV
+    at 300 K.
+  - The remaining grade is below the nominal 67 meV between the neutral-base edges. The likely cause is the
+    base–collector depletion cutting the grade short; checking it is a 0.9b item.
+  - The SiGe gain at 250–400 K (about 80) differs from 0.8 (106 → 68) because of Klaassen vs Masetti mobility
+    and the FD-consistent narrowing in the emitter.
+  - Below 250 K, results keep `extrapolated` and `cryo_unvalidated`: the core is checked against closed forms
+    and Charon, not against measured devices.
+
 ## Single-event upset example
 
 ```python

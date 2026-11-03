@@ -3,7 +3,8 @@
     from simws.hub.canonical import canonical_json, job_id, canonical_quantity
     jid = job_id(key_dict)                        # 32 hex characters
 
-Canonical form: JSON with sorted keys and no whitespace; floats printed with Python's shortest round-trip repr;
+Canonical form: JSON with sorted keys and no whitespace; floats in job inputs rounded to 12 significant digits (so
+floating-point noise from upstream arithmetic does not create new jobs) and printed with Python's shortest repr;
 NaN and infinity refused; numpy scalars and arrays converted to Python numbers and lists; quantities converted to
 the canonical unit of their dimension (SI base units, except energies in eV and LET in MeV cm2/mg) and written as
 {"dims": {...}, "unit": <canonical unit>, "value": ...}, so the hash does not depend on how a unit was spelled or
@@ -53,9 +54,30 @@ def to_canonical(value, unit: str):
     return v, cu, dims
 
 
+SIG_DIGITS = 12          # job keys round floats to 12 significant digits (0.9a): 0.1 + 0.2 and 0.3 are the same job
+
+
+def round_sig(x):
+    """Round every float in a (nested) value to SIG_DIGITS significant digits; ints, strings, bools unchanged."""
+    if isinstance(x, bool) or x is None or isinstance(x, (str, int)) and not isinstance(x, float):
+        return x
+    if isinstance(x, (float, np.floating)):
+        f = float(x)
+        return float(f"{f:.{SIG_DIGITS}g}") if math.isfinite(f) else f
+    if isinstance(x, np.integer):
+        return int(x)
+    if isinstance(x, np.ndarray):
+        return round_sig(x.tolist())
+    if isinstance(x, (list, tuple)):
+        return [round_sig(v) for v in x]
+    if isinstance(x, dict):
+        return {k: round_sig(v) for k, v in x.items()}
+    return x
+
+
 def canonical_quantity(value, unit: str) -> dict:
     v, cu, dims = to_canonical(value, unit)
-    return {"dims": dims, "unit": cu, "value": _plain(v)}
+    return {"dims": dims, "unit": cu, "value": round_sig(_plain(v))}
 
 
 def _plain(x: Any):

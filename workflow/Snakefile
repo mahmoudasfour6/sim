@@ -62,6 +62,7 @@ rule studies:
         f"{RES}/sige/devices.json",
         f"{RES}/dft/checks.json",
         f"{RES}/flagship_a/flagship_a.json",
+        f"{RES}/cryo_gate/cryo_gate.json",
 
 
 rule materials_table:
@@ -313,16 +314,29 @@ rule hub_gate:
 
 
 FLAGSHIP_A_SRC = ["simws/studies/flagship_a.py", "simws/studies/specs/flagship_a.yaml", "workflow/scripts/flagship_a.py"]
+# ---- simws 0.9a cryogenic core
+CRYO_SRC = ["simws/tcad/cryo.py", "simws/tcad/physics.py", "simws/tcad/solve.py", "simws/validation/cryo_checks.py",
+            "simws/materials/data/silicon.yaml"]
 
 
 rule flagship_a:
-    input: HUB_SRC + SIGE_SRC + FLAGSHIP_A_SRC
+    input: HUB_SRC + SIGE_SRC + FLAGSHIP_A_SRC + CRYO_SRC
     output: f"{RES}/flagship_a/flagship_a.json", f"{RES}/flagship_a/flagship_a_table.txt"
-    threads: 1
-    resources: mem_mb=1500
+    threads: 6
+    resources: mem_mb=9000
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/flagship_a"
     log: "logs/flagship_a.log"
-    shell: "{params.env} {params.py} workflow/scripts/flagship_a.py --outdir {params.out} > {log} 2>&1"
+    shell: "{params.env} {params.py} workflow/scripts/flagship_a.py --outdir {params.out} --workers {threads} > {log} 2>&1"
+
+
+rule cryo_gate:
+    input: HUB_SRC + SIGE_SRC + CRYO_SRC + ["workflow/scripts/cryo_gate.py", f"{RES}/flagship_a/flagship_a.json"]
+    output: f"{RES}/cryo_gate/cryo_gate.json"
+    threads: 1
+    resources: mem_mb=2500
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/cryo_gate", fl=f"{RES}/flagship_a/flagship_a.json"
+    log: "logs/cryo_gate.log"
+    shell: "rm -rf {params.out}/store; {params.env} {params.py} workflow/scripts/cryo_gate.py --outdir {params.out} --flagship {params.fl} > {log} 2>&1"
 
 
 rule paper:

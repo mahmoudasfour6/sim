@@ -73,6 +73,11 @@ def analyse(levels, values, seconds, ratio=2.0, Fs=1.25, noise_rel=1e-4) -> Refi
         return res
     p = math.log(abs(e32 / e21)) / math.log(ratio)
     res.order = p
+    if p <= 0:
+        # the change grows (or stays) with refinement: no convergence order, and the GCI formula would turn negative
+        res.notes.append(f"differences do not shrink with refinement (observed order {p:.2f}): not converging "
+                         "at these resolutions; refine further")
+        return res
     res.richardson = f1 + (f1 - f2) / (ratio ** p - 1)
     gci12 = Fs * abs(e21 / f1) / (ratio ** p - 1)
     gci23 = Fs * abs(e32 / f2) / (ratio ** p - 1)

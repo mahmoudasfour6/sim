@@ -133,6 +133,9 @@ class Adapter:
 
     # ------------------------------------------------------------------ full lifecycle
     def execute(self, job: JobEnvelope, staging: Path) -> ResultEnvelope:
+        members = job.key.params.get(MEMBERS_KEY)
+        if members:
+            return self._execute_members(job, staging, members)
         ctx = Context(staging, job, self.manifest)
         try:
             self.prepare(job, ctx)
@@ -152,6 +155,34 @@ class Adapter:
                               diagnostics=ctx.diagnostics, flags=ctx.flags, message=msg,
                               citations=ctx.citations,
                               validity={"box": {k: list(v) for k, v in self.manifest.validity.items()}})
+
+
+    def _execute_members(self, job: JobEnvelope, staging: Path, members: Dict[str, Dict[str, Any]]) -> ResultEnvelope:
+        """Batched ensemble: run every member in this one process; quantities carry their member IDs. The whole
+        job fails if any member fails (a partial ensemble would bias the spread)."""
+        base = {k: v for k, v in job.key.params.items() if k != MEMBERS_KEY}
+        qs, flags, problems, diag, verif = [], [], [], {}, {}
+        for mid in sorted(members):
+            sub = job.model_copy(deep=True)
+            sub.key.params = {**base, **members[mid]}
+            sub.key.member = mid
+            r = self.execute(sub, staging)
+            if r.status != "ok":
+                return ResultEnvelope(job_id=job.id, status=r.status, message=f"member {mid}: {r.message}",
+                                      citations=r.citations, diagnostics={"failed_member": mid})
+            for q in r.quantities:
+                q.member = mid
+            qs += r.quantities
+            flags += [f for f in r.flags if f not in flags]
+            diag[mid], verif[mid] = r.diagnostics, r.verification
+        return ResultEnvelope(job_id=job.id, status="ok", quantities=qs, flags=flags,
+                              diagnostics={"members": diag, "batched": True}, verification=verif,
+                              physics_edges=list(self.manifest.physics_edges), citations=list(self.manifest.citations),
+                              validity={"box": {k: list(v) for k, v in self.manifest.validity.items()}},
+                              message="; ".join(problems))
+
+
+MEMBERS_KEY = "_members"      # params key for batched ensemble members {member id: param overrides}
 
 
 # ---------------------------------------------------------------------------------------------- registry

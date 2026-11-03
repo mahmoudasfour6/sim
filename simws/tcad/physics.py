@@ -47,7 +47,28 @@ class Physics:
     trap_level_eV: float = 0.0           # SRH trap energy relative to the intrinsic level, E_t - E_i (deep-level traps)
     ge: Optional[str] = None             # Ge fraction x of Si(1-x)Ge(x) as a node expression (e.g. a graded HBT base)
     ge_mode: str = "strained"            # "strained" (pseudomorphic on Si) or "relaxed" (bulk alloy)
+    # --- 0.9a cryogenic core (simws.tcad.cryo); all off by default, so 0.8 results are unchanged
+    incomplete_ionization: bool = False  # Altermatt (2006) freeze-out of donors and acceptors
+    fermi_dirac: bool = False            # Fermi-Dirac statistics (degeneracy factor in charge, currents, contacts)
+    mobility: str = "masetti"            # "masetti" | "klaassen" (Klaassen 1992 unified, carrier-dependent)
+    donor_species: str = "P"             # P | As (ionization parameters; Klaassen electron parameters)
+    acceptor_species: str = "B"
+    ii_model: str = "altermatt"          # "altermatt" | "charon" (constant energy, full ionization above ii_N_crit)
+    ii_N_crit: Optional[float] = None    # charon model only (cm^-3)
+    ii_E_const: Optional[float] = None   # charon model only (eV)
+    initial_guess: Optional[Dict[str, list]] = None   # node values of Potential/Electrons/Holes (T continuation)
+    # DEVSIM extended (80-bit long double) model evaluation, assembly and solve; None = on for cryo devices below
+    # 200 K, where minority densities fall below 1e-300 cm^-3 and double-precision Newton updates stall
+    extended_precision: Optional[bool] = None
     extra: Dict[str, float] = field(default_factory=dict)
+
+    @property
+    def cryo(self) -> bool:
+        return self.incomplete_ionization or self.fermi_dirac or self.mobility == "klaassen"
+
+    @property
+    def extended(self) -> bool:
+        return self.extended_precision if self.extended_precision is not None else (self.cryo and self.T < 200.0)
 
 
 def EnsureEdgeFromNodeModelExists(device, region, nodemodel):
@@ -154,7 +175,9 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     T = phys.T
     V_t = K_B_EV * T
     n_i = intrinsic_density(mat, T)
-    used = {"T_K": T, "n_i_cm3": n_i, "V_t": V_t}
+    used = {"T_K": T, "n_i_cm3": n_i, "V_t": V_t, "extended_precision": phys.extended}
+    for k in ("extended_solver", "extended_model", "extended_equation"):    # global; reset_devsim clears them
+        set_parameter(name=k, value=phys.extended)
     for name, val in {"Permittivity": mat.get("eps_r", "dimensionless") * EPS0_F_PER_CM, "ElectronCharge": Q_E,
                       "V_t": V_t, "n_i": n_i, "T": T}.items():
         set_parameter(device=device, region=region, name=name, value=val)
@@ -164,7 +187,13 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     CreateNodeModel(device, region, "Ntot", f"max({total_doping}, 1.0)")
     if phys.bgn:
         E0, Nr, C = mat.get("bgn_E0", "eV"), mat.get("bgn_N_ref", "cm**-3"), mat.get("bgn_C", "dimensionless")
-        CreateNodeModel(device, region, "DeltaEg", f"{E0}*(log(Ntot/{Nr}) + pow(log(Ntot/{Nr})^2 + {C}, 0.5))")
+        slot = f"{E0}*(log(Ntot/{Nr}) + pow(log(Ntot/{Nr})^2 + {C}, 0.5))"
+        if phys.fermi_dirac:
+            # Slotboom's narrowing is APPARENT (fitted at 300 K with Boltzmann statistics); with Fermi-Dirac the
+            # physical narrowing is dEg_app - kT300 ln(gamma_300) of the majority carriers (degeneracy at 300 K),
+            # assumed temperature independent. Using the apparent value with FD would count degeneracy twice.
+            slot = f"({slot}) + {_fd_bgn_correction(mat, n_i_300=intrinsic_density(mat, 300.0))}"
+        CreateNodeModel(device, region, "DeltaEg", slot)
     else:
         CreateNodeModel(device, region, "DeltaEg", "0")
     # band-edge shifts relative to the silicon reference (eV, positive = conduction band down / valence band up):
@@ -176,12 +205,14 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     CreateNodeModel(device, region, "n_ie", "n_i*exp((dEc + dEv)/(2*V_t))")
     eps_expr = _permittivity_expr(mat, phys)
     CreateNodeModel(device, region, "Eps", eps_expr)
+    ionnet = _cryo_setup(device, region, mat, phys, n_i, used) if phys.cryo else (lambda nprime, pprime: "NetDoping")
 
     # potential-only start: n = n_i exp((psi + dEg/2)/Vt), p = n_i exp(-(psi - dEg/2)/Vt)
     CreateSolution(device, region, "Potential")
     for name, expr in (("IntrinsicElectrons", "n_i*exp((Potential + dEc)/V_t)"),
                        ("IntrinsicHoles", "n_i*exp(-(Potential - dEv)/V_t)"),
-                       ("PotentialIntrinsicCharge", "-ElectronCharge*(kahan3(IntrinsicHoles, -IntrinsicElectrons, NetDoping)"
+                       ("PotentialIntrinsicCharge", "-ElectronCharge*(kahan3(IntrinsicHoles, -IntrinsicElectrons, "
+                        + ionnet("IntrinsicElectrons", "IntrinsicHoles") + ")"
                         + (f" + {extra_charge('IntrinsicElectrons')}" if extra_charge else "") + ")")):
         CreateNodeModel(device, region, name, expr)
         CreateNodeModelDerivative(device, region, name, expr, "Potential")
@@ -200,7 +231,11 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
                 get_parameter(device=device, name=_bias(c))
             except Exception:  # noqa: BLE001
                 set_parameter(device=device, name=_bias(c), value=0.0)
-        _potential_contact(device, region, c, circ)
+        _potential_contact(device, region, c, circ, cryo=phys.cryo)
+    if phys.initial_guess and "Potential" in phys.initial_guess:
+        set_node_values(device=device, region=region, name="Potential", values=list(phys.initial_guess["Potential"]))
+    elif phys.cryo:
+        set_node_values(device=device, region=region, name="Potential", values=_neutral_potential(device, region))
     if pre_solve:
         pre_solve()
     if solve_equilibrium:
@@ -212,11 +247,25 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     CreateSolution(device, region, "Electrons"); CreateSolution(device, region, "Holes")
     set_node_values(device=device, region=region, name="Electrons", init_from="IntrinsicElectrons")
     set_node_values(device=device, region=region, name="Holes", init_from="IntrinsicHoles")
+    if phys.fermi_dirac:
+        _init_fd_carriers(device, region)
+    if phys.initial_guess:
+        for v in ("Electrons", "Holes"):
+            if v in phys.initial_guess:
+                set_node_values(device=device, region=region, name=v, values=list(phys.initial_guess[v]))
     for v in ("Potential", "Electrons", "Holes", "dEc", "dEv"):
         EnsureEdgeFromNodeModelExists(device, region, v)
+    if phys.fermi_dirac:
+        _fd_degeneracy_models(device, region)
 
     # mobility: Masetti per node -> edge average; optional velocity saturation on top
-    if phys.doping_mobility and phys.mu_n is None:
+    if phys.mobility == "klaassen" and phys.mu_n is None:
+        from devsim import node_solution
+        for c in ("n", "p"):
+            node_solution(device=device, region=region, name=f"mu_{c}_node_si")
+            CreateNodeModel(device, region, f"mu_{c}_node", f"mu_{c}_node_si")
+        update_mobility(device, region)
+    elif phys.doping_mobility and phys.mu_n is None:
         for c in ("n", "p"):
             CreateNodeModel(device, region, f"mu_{c}_node", _masetti_expr(mat, T, c))
             CreateNodeModel(device, region, f"mu_{c}_node_si", _masetti_expr(mat, T, c))
@@ -248,12 +297,21 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
     # differentiation take ~30 s per device.
     for c, sgn, band in (("n", "+", "dEc"), ("p", "-", "dEv")):
         vd = f"vdiff_{c}"
-        CreateEdgeModel(device, region, vd, f"(Potential@n0 - Potential@n1 {sgn} ({band}@n0 - {band}@n1))/V_t")
+        # Fermi-Dirac: generalised Einstein relation through the effective potential
+        # psi + dEc + V_t ln(gamma_n) (electrons) and psi - dEv - V_t ln(gamma_p) (holes)
+        g, var = ("LnGn", "Electrons") if c == "n" else ("LnGp", "Holes")
+        fd = f" {sgn} ({g}@n0 - {g}@n1)" if phys.fermi_dirac else ""
+        CreateEdgeModel(device, region, vd, f"(Potential@n0 - Potential@n1 {sgn} ({band}@n0 - {band}@n1))/V_t{fd}")
         CreateEdgeModel(device, region, f"{vd}:Potential@n0", "1/V_t")
         CreateEdgeModel(device, region, f"{vd}:Potential@n1", "-1/V_t")
         CreateEdgeModel(device, region, f"Bern_{c}", f"B({vd})")
         CreateEdgeModel(device, region, f"Bern_{c}:Potential@n0", f"dBdx({vd})/V_t")
         CreateEdgeModel(device, region, f"Bern_{c}:Potential@n1", f"-dBdx({vd})/V_t")
+        if phys.fermi_dirac:
+            CreateEdgeModel(device, region, f"{vd}:{var}@n0", f"{sgn}{g}:{var}@n0")
+            CreateEdgeModel(device, region, f"{vd}:{var}@n1", f"{'-' if sgn == '+' else '+'}{g}:{var}@n1")
+            CreateEdgeModel(device, region, f"Bern_{c}:{var}@n0", f"dBdx({vd})*{vd}:{var}@n0")
+            CreateEdgeModel(device, region, f"Bern_{c}:{var}@n1", f"dBdx({vd})*{vd}:{var}@n1")
     Jn = (f"ElectronCharge*{mu_n}*EdgeInverseLength*V_t*kahan3(Electrons@n1*Bern_n, Electrons@n1*vdiff_n, "
           f"-Electrons@n0*Bern_n)")
     Jp = (f"-ElectronCharge*{mu_p}*EdgeInverseLength*V_t*kahan3(Holes@n1*Bern_p, -Holes@n0*Bern_p, "
@@ -265,6 +323,7 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
 
     # recombination
     terms = []
+    NP_EQ = "exp(LnGn + LnGp)*n_ie^2" if phys.fermi_dirac else "n_ie^2"
     if phys.srh:
         if phys.tau_n is None:
             tn, tp = mat.get("srh_tau_max_n", "s"), mat.get("srh_tau_max_p", "s")
@@ -277,10 +336,14 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
             CreateNodeModel(device, region, "tau_p", str(phys.tau_p if phys.tau_p is not None else phys.tau_n))
         et = phys.trap_level_eV
         n1, p1 = (f"n_ie*exp({et}/V_t)", f"n_ie*exp({-et}/V_t)") if et else ("n_ie", "n_ie")
-        terms.append(f"(Electrons*Holes - n_ie^2)/(tau_p*(Electrons + {n1}) + tau_n*(Holes + {p1}))")
+        if phys.fermi_dirac:
+            # Fermi-Dirac: equilibrium is n p = gamma_n gamma_p n_ie^2, so the driving term and the trap densities
+            # carry the degeneracy factors (Sentaurus form); without them a degenerate emitter would generate
+            n1, p1 = f"exp(LnGn)*{n1}", f"exp(LnGp)*{p1}"
+        terms.append(f"(Electrons*Holes - {NP_EQ})/(tau_p*(Electrons + {n1}) + tau_n*(Holes + {p1}))")
     if phys.auger:
         terms.append(f"({mat.get('auger_Cn', 'cm**6/s')}*Electrons + {mat.get('auger_Cp', 'cm**6/s')}*Holes)"
-                     "*(Electrons*Holes - n_ie^2)")
+                     f"*(Electrons*Holes - {NP_EQ})")
     U = " + ".join(terms) if terms else "0"
     CreateNodeModel(device, region, "URecomb", U)
     for v in ("Electrons", "Holes"):
@@ -295,7 +358,8 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
                             ("PCharge", "ElectronCharge*Holes", "Holes")):
         CreateNodeModel(device, region, name, expr)
         CreateNodeModelDerivative(device, region, name, expr, var)
-    pne = ("-ElectronCharge*(kahan3(Holes, -Electrons, NetDoping)"
+    nprime, pprime = ("(Electrons*exp(-LnGn))", "(Holes*exp(-LnGp))") if phys.fermi_dirac else ("Electrons", "Holes")
+    pne = ("-ElectronCharge*(kahan3(Holes, -Electrons, " + ionnet(nprime, pprime) + ")"
            + (f" + {extra_charge('Electrons')}" if extra_charge else "") + ")")
     CreateNodeModel(device, region, "PotentialNodeCharge", pne)
     for v in ("Electrons", "Holes"):
@@ -314,9 +378,21 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
         used["impact_gamma"] = impact_gamma(mat, T)
         models.impact_ionization(device, region, mat, gamma=used["impact_gamma"])
     for c, circ in contacts.items():
-        _carrier_contact(device, region, c, circ)
+        _carrier_contact(device, region, c, circ, cryo=phys.cryo)
     if solve_equilibrium:
-        solve(type="dc", absolute_error=1e10, relative_error=1e-8, maximum_iterations=60)
+        tol = 1e-8
+        try:
+            solve(type="dc", absolute_error=1e10, relative_error=tol, maximum_iterations=60)
+        except Exception:
+            if not phys.cryo:
+                raise
+            # cold devices: minority densities span ~80 decades and the Newton update of the smallest ones stalls
+            # at ~1e-6 relative while the absolute residual is already negligible: accept 1e-5 and record it
+            tol = 1e-5
+            solve(type="dc", absolute_error=1e10, relative_error=tol, maximum_iterations=60)
+        used["equilibrium_rel_tol"] = tol
+        if phys.mobility == "klaassen":
+            relax_mobility(device, region, dict(absolute_error=1e10, relative_error=tol, maximum_iterations=60))
     return used
 
 
@@ -332,7 +408,7 @@ def _bias(contact):
     return GetContactBiasName(contact)
 
 
-def _potential_contact(device, region, contact, is_circuit):
+def _potential_contact(device, region, contact, is_circuit, cryo=False):
     from devsim import contact_equation
     from devsim.python_packages.model_create import (CreateContactNodeModel, CreateEdgeModel,
                                                       CreateEdgeModelDerivatives, InEdgeModelList)
@@ -341,7 +417,8 @@ def _potential_contact(device, region, contact, is_circuit):
         CreateEdgeModelDerivatives(device, region, "contactcharge_edge", "EpsEdge*ElectricField", "Potential")
     b = _bias(contact)
     # psi = bias + Vt ln(n0/n_i) - dEg/2  (equivalently bias - Vt ln(p0/n_i) + dEg/2, since n0 p0 = n_ie^2)
-    expr = f"Potential - {b} - V_t*log({_N0}/n_i) + dEc"
+    expr = (f"Potential - {b} - V_t*log(N0eq/n_i) + V_t*LnGn0eq + dEc" if cryo
+            else f"Potential - {b} - V_t*log({_N0}/n_i) + dEc")
     name = f"{contact}nodemodel"
     CreateContactNodeModel(device, contact, name, expr)
     CreateContactNodeModel(device, contact, f"{name}:Potential", "1")
@@ -353,14 +430,14 @@ def _potential_contact(device, region, contact, is_circuit):
     contact_equation(**kw)
 
 
-def _carrier_contact(device, region, contact, is_circuit):
+def _carrier_contact(device, region, contact, is_circuit, cryo=False):
     from devsim import contact_equation
     from devsim.python_packages.model_create import CreateContactNodeModel
     for eq, var, edge, expr in (
             ("ElectronContinuityEquation", "Electrons", "ElectronCurrent",
-             f"Electrons - {_N0}"),
+             "Electrons - N0eq" if cryo else f"Electrons - {_N0}"),
             ("HoleContinuityEquation", "Holes", "HoleCurrent",
-             f"Holes - {_P0}")):
+             "Holes - P0eq" if cryo else f"Holes - {_P0}")):
         name = f"{contact}node{var.lower()}"
         CreateContactNodeModel(device, contact, name, expr)
         CreateContactNodeModel(device, contact, f"{name}:{var}", "1")
@@ -375,3 +452,161 @@ def contact_current(device, contact):
     from devsim import get_contact_current
     return (get_contact_current(device=device, contact=contact, equation="ElectronContinuityEquation")
             + get_contact_current(device=device, contact=contact, equation="HoleContinuityEquation"))
+
+
+# ---------------------------------------------------------------------------------------------- 0.9a cryogenic core
+_CRYO: Dict[tuple, dict] = {}
+
+
+def _node(device, region, name):
+    import numpy as np
+    from devsim import get_node_model_values
+    return np.array(get_node_model_values(device=device, region=region, name=name))
+
+
+def _cryo_setup(device, region, mat, phys, n_i, used):
+    """Band parameters, total donor/acceptor densities, contact equilibria; returns ionnet(n', p') -> expression of
+    the ionized net doping N_D+ - N_A- (or NetDoping when incomplete ionization is off)."""
+    from devsim import node_solution, set_node_values, set_parameter
+    from devsim.python_packages.model_create import CreateNodeModel
+    from simws.tcad import cryo as C
+    T = phys.T
+    Ncv, Nvv, Eg = C.band_params(mat, T, n_i)
+    for k, v in (("Nc_eff", Ncv), ("Nv_eff", Nvv)):
+        set_parameter(device=device, region=region, name=k, value=v)
+    CreateNodeModel(device, region, "NDtot", "max(0.5*(Ntot + NetDoping), 0)")
+    CreateNodeModel(device, region, "NAtot", "max(0.5*(Ntot - NetDoping), 0)")
+    pd, pa = C.ii_params(mat, phys.donor_species), C.ii_params(mat, phys.acceptor_species)
+    kw = dict(model=phys.ii_model, N_crit=phys.ii_N_crit, E_const=phys.ii_E_const)
+    st = dict(mat=mat, T=T, Nc=Ncv, Nv=Nvv, pd=pd, pa=pa, phys=phys, kw=kw)
+    _CRYO[(device, region)] = st
+    used.update(Nc_eff_cm3=Ncv, Nv_eff_cm3=Nvv, Eg_eV=Eg, cryo=dict(incomplete_ionization=phys.incomplete_ionization,
+                fermi_dirac=phys.fermi_dirac, mobility=phys.mobility, ii_model=phys.ii_model))
+    # equilibrium (zero bias, local neutrality) densities for contacts and the initial guess
+    ND, NA, nie = _node(device, region, "NDtot"), _node(device, region, "NAtot"), _node(device, region, "n_ie")
+    n, p, npr, ppr = C.device_equilibrium(mat, ND, NA, nie, T, Ncv, Nvv, phys.donor_species, phys.acceptor_species,
+                                          phys.incomplete_ionization, phys.fermi_dirac, **kw)
+    import numpy as np
+    for name, vals in (("N0eq", n), ("P0eq", p), ("N0prime", npr), ("LnGn0eq", np.log(n / npr))):
+        node_solution(device=device, region=region, name=name)
+        set_node_values(device=device, region=region, name=name, values=vals.tolist())
+
+    def ionnet(nprime, pprime):
+        if not phys.incomplete_ionization:
+            return "NetDoping"
+        d = C.ionized_expr(pd, "NDtot", nprime, Ncv, T, **kw)
+        a = C.ionized_expr(pa, "NAtot", pprime, Nvv, T, **kw)
+        return f"({d} - {a})"
+    return ionnet
+
+
+def _neutral_potential(device, region):
+    """Initial potential = local charge-neutral value V_t ln(n'_eq/n_i) - dEc (Charon's 'equilibrium potential')."""
+    import numpy as np
+    from devsim import get_parameter
+    Vt = get_parameter(device=device, region=region, name="V_t")
+    ni = get_parameter(device=device, region=region, name="n_i")
+    return (Vt * np.log(_node(device, region, "N0prime") / ni) - _node(device, region, "dEc")).tolist()
+
+
+def _init_fd_carriers(device, region):
+    """Electrons/holes consistent with FD at the solved potential: n = n'(psi) mapped through the statistics."""
+    from devsim import set_node_values
+    from simws.tcad import cryo as C
+    st = _CRYO[(device, region)]
+    set_node_values(device=device, region=region, name="Electrons",
+                    values=C.density_from_prime(_node(device, region, "IntrinsicElectrons"), st["Nc"]).tolist())
+    set_node_values(device=device, region=region, name="Holes",
+                    values=C.density_from_prime(_node(device, region, "IntrinsicHoles"), st["Nv"]).tolist())
+
+
+def _fd_degeneracy_models(device, region):
+    from devsim.python_packages.model_create import CreateNodeModel, CreateNodeModelDerivative
+    from simws.tcad import cryo as C
+    st = _CRYO[(device, region)]
+    for g, var, Nb in (("LnGn", "Electrons", st["Nc"]), ("LnGp", "Holes", st["Nv"])):
+        expr = C.ln_gamma_expr(f"{var}/{Nb!r}")
+        CreateNodeModel(device, region, g, expr)
+        CreateNodeModelDerivative(device, region, g, expr, var)
+        EnsureEdgeFromNodeModelExists(device, region, g)
+        EnsureEdgeFromNodeModelExists(device, region, f"{g}:{var}")
+
+
+def update_mobility(device, region, relax: float = 1.0) -> float:
+    """Klaassen mobility from the current carrier densities (and ionized dopants when freeze-out is on), written
+    into the node solutions mu_n_node_si / mu_p_node_si (log-space under-relaxation: mu_old^(1-r) mu_new^r).
+    Returns the largest relative change of the full (unrelaxed) update."""
+    import numpy as np
+    from devsim import get_node_model_list, set_node_values
+    from simws.tcad import cryo as C
+    st = _CRYO[(device, region)]
+    phys, mat, T = st["phys"], st["mat"], st["T"]
+    ND, NA = _node(device, region, "NDtot"), _node(device, region, "NAtot")
+    have = set(get_node_model_list(device=device, region=region))
+    n = _node(device, region, "Electrons") if "Electrons" in have else _node(device, region, "N0eq")
+    p = _node(device, region, "Holes") if "Holes" in have else _node(device, region, "P0eq")
+    if phys.incomplete_ionization:
+        npr = C.prime_from_density(n, st["Nc"], phys.fermi_dirac)
+        ppr = C.prime_from_density(p, st["Nv"], phys.fermi_dirac)
+        ND = ND * C.ionized_fraction(st["pd"], ND, npr, st["Nc"], T, **st["kw"])
+        NA = NA * C.ionized_fraction(st["pa"], NA, ppr, st["Nv"], T, **st["kw"])
+    change = 0.0
+    for c in ("n", "p"):
+        new = C.klaassen_mobility(mat, c, NA, ND, n, p, T, phys.donor_species)
+        name = f"mu_{c}_node_si"
+        if name in have:
+            old = _node(device, region, name)
+            if old.size and np.all(old > 0):
+                change = max(change, float(np.max(np.abs(new / old - 1))))
+                if relax < 1.0:
+                    new = old * (new / old) ** relax
+            else:
+                change = 1.0
+        set_node_values(device=device, region=region, name=name, values=new.tolist())
+    return change
+
+
+def relax_mobility(device, region, opts, tol=1e-9, max_iter=60) -> int:
+    """Outer (Picard) iteration of the carrier-dependent Klaassen mobility to self-consistency after a solve.
+    The coupling registry lists this as a two-way coupling inside the adapter process. A Newton failure after a
+    mobility update restores the previous mobility and solution and retries with the update halved (log-space
+    under-relaxation); the relaxation grows back after successes. The converged state does not depend on it."""
+    from devsim import solve
+    names = [f"mu_{c}_node_si" for c in ("n", "p")]
+    r = 1.0
+    for k in range(max_iter):
+        saved = {v: _node(device, region, v) for v in names + ["Potential", "Electrons", "Holes"]}
+        if update_mobility(device, region, relax=r) < tol:
+            _restore(device, region, {v: saved[v] for v in names})   # keep the converged pair unchanged
+            return k
+        try:
+            solve(type="dc", **opts)
+            r = min(1.0, 2 * r)
+        except Exception:
+            _restore(device, region, saved)
+            r *= 0.25
+            if r < 1e-3:
+                raise RuntimeError("Klaassen mobility update did not converge (convergence failure: Newton fails "
+                                   "even for a 0.1 % mobility step)")
+    raise RuntimeError(f"Klaassen mobility did not converge (convergence failure) in {max_iter} outer iterations")
+
+
+def _restore(device, region, values):
+    from devsim import set_node_values
+    for k, v in values.items():
+        set_node_values(device=device, region=region, name=k, values=v.tolist())
+
+
+def solution_arrays(device, region) -> Dict[str, list]:
+    """Node values of Potential, Electrons, Holes (for temperature continuation)."""
+    return {v: _node(device, region, v).tolist() for v in ("Potential", "Electrons", "Holes")}
+
+
+def _fd_bgn_correction(mat, n_i_300) -> str:
+    """-kT ln(gamma) at 300 K for the majority carriers of the local doping (node expression, eV)."""
+    from simws.tcad import cryo as C
+    Nc3, Nv3, _ = C.band_params(mat, 300.0, n_i_300)
+    kT = K_B_EV * 300.0
+    nd, na = "max(0.5*(Ntot + NetDoping), 1)", "max(0.5*(Ntot - NetDoping), 1)"
+    gn, gp = C.ln_gamma_expr(f"({nd})/{Nc3!r}"), C.ln_gamma_expr(f"({na})/{Nv3!r}")
+    return f"(-{kT!r}*ifelse(NetDoping > 0, {gn}, {gp}))"

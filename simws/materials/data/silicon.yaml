@@ -69,6 +69,49 @@ parameters:
   vsat_p_T_exponent: {value: 0.52,  unit: dimensionless, ref: "Canali et al. (1975)", status: provisional}
   # --- impact-ionization temperature factor gamma = tanh(hw/2kT0)/tanh(hw/2kT)
   ii_hbar_omega:    {value: 0.063,  unit: eV, ref: "Van Overstraeten & De Man (1970), optical-phonon energy", status: verified}
+  # --- cryogenic core (simws 0.9a): incomplete ionization, Altermatt et al. model
+  #     E_dop = E_dop0 / (1 + (N/N_ref)^c); b = 1 / (1 + (N/N_b)^d); N+/N = 1 - b n / (n + g n1), n1 = Nc exp(-E_dop/kT)
+  ii_P_E0:     {value: 45.5e-3,  unit: eV,     ref: "Altermatt, Schenk, Heiser & Green, SISPAD 2006, Table I (Si:P); J. Appl. Phys. 100, 113714 (2006)", status: verified}
+  ii_P_Nref:   {value: 2.2e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_P_c:      {value: 2.0,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_P_Nb:     {value: 6.0e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_P_d:      {value: 2.3,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_P_g:      {value: 0.5,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I (g = 1/2, i.e. donor degeneracy 2)", status: verified}
+  ii_As_E0:    {value: 53.7e-3,  unit: eV,     ref: "Altermatt et al., SISPAD 2006, Table I (Si:As); J. Appl. Phys. 100, 113715 (2006)", status: verified}
+  ii_As_Nref:  {value: 3.0e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_As_c:     {value: 1.5,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_As_Nb:    {value: 9.0e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_As_d:     {value: 1.8,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_As_g:     {value: 0.5,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_B_E0:     {value: 44.39e-3, unit: eV,     ref: "Altermatt et al., SISPAD 2006, Table I (Si:B); J. Appl. Phys. 100, 113715 (2006)", status: verified}
+  ii_B_Nref:   {value: 1.3e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_B_c:      {value: 1.4,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_B_Nb:     {value: 4.5e18,   unit: cm**-3, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_B_d:      {value: 2.4,      unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I", status: verified}
+  ii_B_g:      {value: 0.25,     unit: dimensionless, ref: "Altermatt et al., SISPAD 2006, Table I (g = 1/4, i.e. acceptor degeneracy 4)", status: verified}
+  cryo_Nc_300: {value: 2.86e19,  unit: cm**-3, ref: "Green, J. Appl. Phys. 67, 2944 (1990), as commonly quoted; not checked against the paper here", status: provisional}
+  cryo_Nv_300: {value: 3.10e19,  unit: cm**-3, ref: "Green, J. Appl. Phys. 67, 2944 (1990), as commonly quoted; not checked against the paper here", status: provisional}
+  # --- Klaassen unified mobility (Philips), Klaassen, Solid-State Electron. 35, 953 and 961 (1992), Table 1;
+  #     values as tabulated in Charon's Material_Properties (Sandia); used when Physics(mobility="klaassen")
+  kl_n_As_mumax: {value: 1417,   unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (As)", status: verified}
+  kl_n_As_mumin: {value: 52.2,   unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (As)", status: verified}
+  kl_n_As_theta: {value: 2.285,  unit: dimensionless, ref: "Klaassen (1992), Table 1", status: verified}
+  kl_n_As_Nref:  {value: 9.68e16, unit: cm**-3,  ref: "Klaassen (1992), Table 1 (As)", status: verified}
+  kl_n_As_alpha: {value: 0.68,   unit: dimensionless, ref: "Klaassen (1992), Table 1 (As)", status: verified}
+  kl_n_P_mumax:  {value: 1414,   unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (P)", status: verified}
+  kl_n_P_mumin:  {value: 68.5,   unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (P)", status: verified}
+  kl_n_P_theta:  {value: 2.285,  unit: dimensionless, ref: "Klaassen (1992), Table 1", status: verified}
+  kl_n_P_Nref:   {value: 9.2e16, unit: cm**-3,  ref: "Klaassen (1992), Table 1 (P)", status: verified}
+  kl_n_P_alpha:  {value: 0.711,  unit: dimensionless, ref: "Klaassen (1992), Table 1 (P)", status: verified}
+  kl_p_mumax:    {value: 470.5,  unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (B)", status: verified}
+  kl_p_mumin:    {value: 44.9,   unit: cm**2/V/s, ref: "Klaassen (1992), Table 1 (B)", status: verified}
+  kl_p_theta:    {value: 2.247,  unit: dimensionless, ref: "Klaassen (1992), Table 1", status: verified}
+  kl_p_Nref:     {value: 2.23e17, unit: cm**-3, ref: "Klaassen (1992), Table 1 (B)", status: verified}
+  kl_p_alpha:    {value: 0.719,  unit: dimensionless, ref: "Klaassen (1992), Table 1 (B)", status: verified}
+  kl_NrefD:      {value: 4.0e20, unit: cm**-3,  ref: "Klaassen (1992), clustering, donors", status: verified}
+  kl_NrefA:      {value: 7.2e20, unit: cm**-3,  ref: "Klaassen (1992), clustering, acceptors", status: verified}
+  kl_cD:         {value: 0.21,   unit: dimensionless, ref: "Klaassen (1992), clustering, donors", status: verified}
+  kl_cA:         {value: 0.5,    unit: dimensionless, ref: "Klaassen (1992), clustering, acceptors", status: verified}
 profiles:
   # Values used by Sandia Charon's built-in "Silicon" material, needed to reproduce Charon decks exactly.
   charon:

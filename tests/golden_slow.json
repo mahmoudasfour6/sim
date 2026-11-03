@@ -155,6 +155,12 @@
     "rtol": 1e-06,
     "value": 0.0049242528613326775
   },
+  "simws.cryo.fd_statistics_error": {
+    "atol": 0.0,
+    "recorded": "2026-11-04",
+    "rtol": 1e-06,
+    "value": 0.00486657344402408
+  },
   "simws.dft.PBE.Nc_300": {
     "atol": 0.0,
     "recorded": "2026-11-03",

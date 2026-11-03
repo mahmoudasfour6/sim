@@ -31,3 +31,4 @@ tools/geant4_track/g4track
 release/
 store/
 sim_data/pseudopotentials/pseudodojo_v0.4/
+runs/

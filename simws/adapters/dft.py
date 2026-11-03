@@ -35,6 +35,9 @@ class SiBandedge(Adapter):
     manifest = Manifest(
         name="dft.si_bandedge", version="1.0", env=_dft_env(), engine="quantum-espresso", engine_version="env-locked",
         description="Si band-edge parameters from pw.x band energies for one exchange-correlation functional",
+        # relinking after an environment upgrade: one canary (an hour of pw.x); MPI reductions are not bitwise
+        # reproducible, so the canary must agree to 1e-6 rather than 1e-9
+        cost_model={"relink_canaries": 1, "relink_rtol": 1e-6},
         inputs=["functional"],
         outputs=[OutputSpec(name="dft.m_l", unit="dimensionless", constraint="positive", description="in m0"),
                  OutputSpec(name="dft.m_t", unit="dimensionless", constraint="positive"),

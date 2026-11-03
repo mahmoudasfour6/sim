@@ -49,6 +49,10 @@ class HBTCase:
     T: float = 300.0
     extra_recombination: Optional[str] = None   # node expression, pairs/cm^3/s added to recombination (TID)
     extra_generation: Optional[str] = None
+    cryo: bool = False         # 0.9a: freeze-out (Altermatt), Fermi-Dirac statistics, Klaassen mobility
+    initial_guess: Optional[dict] = None   # node values from a previous temperature (continuation)
+    mesh_scale: float = 1.0    # multiplies every mesh spacing (0.5 = twice as fine in x and y; refinement studies)
+    extended_precision: Optional[bool] = None   # None: automatic (cryo below 200 K), see simws.tcad.physics.Physics
 
 
 def doping(case: HBTCase):
@@ -80,7 +84,8 @@ def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lin
     xl = sorted({(0, 0.05), (case.w_e - 0.05, 0.02), (case.w_e, 0.01), (case.w_e + 0.05, 0.02), (case.x_xb, 0.02),
                  (case.x_bc, 0.05), (case.width_um, 0.1)} | set(x_lines))
     yl = [(0, 0.005), (case.t_e, 0.002), (yb, 0.002), (yb + 0.1, 0.01), (case.y_sc, 0.05), (case.depth_um, 0.1)]
-    _mesh_2d(case.width_um, case.depth_um, xl, yl)
+    s = case.mesh_scale
+    _mesh_2d(case.width_um, case.depth_um, [(x, h * s) for x, h in xl], [(y, h * s) for y, h in yl])
     add_2d_contact(mesh="m", name="emitter", material="metal", region="si", yl=0, yh=0, xl=0, xh=case.w_e * UM, bloat=1e-10)
     add_2d_contact(mesh="m", name="base", material="metal", region="si", yl=0, yh=0, xl=case.x_bc * UM,
                    xh=case.width_um * UM, bloat=1e-10)
@@ -99,7 +104,10 @@ def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lin
         if case.extra_recombination:
             parts.append(f"-({case.extra_recombination})")
         gen = " + ".join(parts)
-    phys = Physics(T=case.T, ge=ge_profile(case), tau_n=case.tau, tau_p=case.tau)
+    phys = Physics(T=case.T, ge=ge_profile(case), tau_n=case.tau, tau_p=case.tau,
+                   incomplete_ionization=case.cryo, fermi_dirac=case.cryo,
+                   mobility="klaassen" if case.cryo else "masetti", initial_guess=case.initial_guess,
+                   extended_precision=case.extended_precision)
     return setup_region("d", "si", mat, net, tot, phys, {"emitter": False, "base": False, "collector": False},
                         extra_generation=gen, extra_charge=extra_charge)
 

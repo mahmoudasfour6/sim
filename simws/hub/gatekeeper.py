@@ -130,6 +130,10 @@ def check(job: JobEnvelope, res: ResultEnvelope, manifest: Manifest, staging: Op
         if staging is not None and f.retention != "scratch" and not (staging / "data" / f.path).is_file():
             r.errors.append(f"field {f.name}: file {f.path} missing")
 
+    # 0.9a: sketches are exploration only
+    if job.fidelity == "paper" and (manifest.name.startswith("sketch.") or "sketch" in res.flags):
+        r.errors.append("paper fidelity refuses sketch results: write an adapter first")
+
     # 9 verification
     if job.fidelity == "paper" and res.status == "ok":
         for k in manifest.verification:

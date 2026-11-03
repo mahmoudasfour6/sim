@@ -18,6 +18,7 @@ import numpy as np
 from simws.hub import guards as G
 from simws.hub.adapter import Adapter, InvalidInput, NotConverged
 from simws.hub.schema import Manifest, OutputSpec, PhysicsEdge
+from simws.units import K_B_EV
 
 A_PER_UM_TO_A_PER_M = 1e6
 CUR = {"terminal_current": "into_device+"}
@@ -45,6 +46,11 @@ def _case(cls, units, ctx, extra=None):
     return cls(**kw)
 
 
+def _no_convergence(e) -> bool:
+    m = str(e).lower()
+    return "converge" in m or "stalled" in m
+
+
 def _devsim_quiet():
     import os
     os.environ.setdefault("DEVSIM_QUIET", "1")
@@ -53,7 +59,7 @@ def _devsim_quiet():
 # ---------------------------------------------------------------------------------------------------- HBT Gummel
 class HbtGummel(Adapter):
     manifest = Manifest(
-        name="devsim.hbt_gummel", version="1.1", env="tcad", engine="devsim", engine_version="env-locked",
+        name="devsim.hbt_gummel", version="1.2", physics_version="1.1", env="tcad", engine="devsim", engine_version="env-locked",
         description="Forward Gummel sweep of the 2D npn SiGe HBT (simws.tcad.hbt) at temperature T",
         inputs=["VBE"],
         outputs=[OutputSpec(name="hbt.IC", unit="A/m", constraint="positive", description="collector current per m of emitter length"),
@@ -63,52 +69,115 @@ class HbtGummel(Adapter):
         native_conventions=CUR,
         # mobility T laws are checked over 200-500 K and n_i(T) over 250-400 K (simws.materials.laws)
         validity={"T": (250.0, 400.0)},
+        verification={"mesh": "paper fidelity: GCI per bias point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"},
         physics_edges=[PhysicsEdge(output="hbt.IC", input="mat.n_i", mechanism="minority-carrier injection ~ n_ie^2"),
                        PhysicsEdge(output="hbt.IC", input="sige.dEv", mechanism="Ge band offset raises n_ie in the base"),
                        PhysicsEdge(output="hbt.IB", input="mat.tau", mechanism="SRH recombination in the emitter/base")],
         citations=["devsim", "masetti1983", "rieger1993"],
     )
+    # cryo=True (0.9a): Altermatt freeze-out, Fermi-Dirac statistics (Nilsson inverse), Klaassen mobility with an
+    # outer Picard iteration after every bias point, FD-consistent band-gap narrowing and recombination
+    CRYO_CITATIONS = ["altermatt2006a", "altermatt2006b", "klaassen1992a", "klaassen1992b", "nilsson1973", "green1990"]
+
+    # paper fidelity: solution verification by mesh refinement (every spacing x 1, 1/sqrt2, 1/2; nodes x1, x2, x4)
+    MESH_RATIO = 2 ** 0.5
+    MESH_LEVELS = 3
+    P_MIN, P_MAX = 0.5, 4.0     # plausible observed orders for the GCI (second-order scheme; corners lower it)
 
     def run(self, job, ctx):
         _devsim_quiet()
-        from simws.tcad.hbt import UM, HBTCase, build, _currents
-        from simws.tcad.solve import ramp_bias
+        from simws.tcad.hbt import HBTCase
         extra = {}
         if job.key.params.get("T") is not None:
             extra["T"] = float(ctx.param("T", unit="K"))
+        if job.key.params.get("cryo") is not None:
+            extra["cryo"] = bool(ctx.param("cryo"))
         case = _case(HBTCase, _HBT_UNITS, ctx, extra)
         VBE = np.atleast_1d(ctx.param("VBE", unit="V")).astype(float)
         VCB = float(ctx.param("VCB", 0.0, unit="V") or 0.0)
         want_jn = bool(ctx.param("intrinsic_jn", False))
-        opts = dict(absolute_error=1e10, relative_error=1e-8, maximum_iterations=40)
+        study = job.fidelity == "paper" or bool(ctx.param("mesh_study", False))
+        if not study:
+            rows, jn = self._sweep(ctx, case, VBE, VCB, want_jn, record=True)
+            ctx.diagnostics["case"] = dataclasses.asdict(case)
+            return {"VBE": VBE[:len(rows)], "I": np.array(rows), "jn": np.array(jn), "T": case.T}
+        # refinement study: coarse -> fine; reported values are the finest mesh's, sigma_num from its GCI
+        levels = []
+        for k in range(self.MESH_LEVELS):
+            c = dataclasses.replace(case, mesh_scale=case.mesh_scale / self.MESH_RATIO ** k)
+            rows, jn = self._sweep(ctx, c, VBE, VCB, want_jn and k == self.MESH_LEVELS - 1,
+                                   record=k == self.MESH_LEVELS - 1, partial_ok=False)
+            levels.append(np.array(rows))
+        n = min(len(L) for L in levels)                    # a current-bounded sweep can stop one point apart
+        levels = [L[:n] for L in levels]
+        ctx.diagnostics["case"] = dataclasses.asdict(dataclasses.replace(
+            case, mesh_scale=case.mesh_scale / self.MESH_RATIO ** (self.MESH_LEVELS - 1)))
+        return {"VBE": VBE[:n], "I": levels[-1], "jn": np.array(jn)[:n], "T": case.T, "I_levels": levels}
+
+    def _sweep(self, ctx, case, VBE, VCB, want_jn, record=True, partial_ok=True):
+        from simws.tcad.hbt import UM, build, _currents
+        from simws.tcad.physics import relax_mobility
+        from simws.tcad.solve import ramp_bias
         rows, jn = [], []
+        ic_max = ctx.param("IC_max_A_per_m", None)
+        ic_max = float(ic_max) if ic_max is not None else None
         try:
-            build(case)                     # includes the equilibrium solve, which can fail for cold devices
+            used = build(case) or {}        # includes the equilibrium solve, which can fail for cold devices
         except Exception as e:
-            if "converge" in str(e).lower():
+            if _no_convergence(e):
                 raise NotConverged(f"equilibrium at T = {case.T:g} K: {e}") from e
             raise
+        # Einstein-relation / detailed-balance guard: at zero bias every terminal current must vanish (an
+        # inconsistent D/mu, e.g. Boltzmann diffusion with Fermi-Dirac densities, drives a spurious current)
+        i0 = np.array(_currents()) * UM * A_PER_UM_TO_A_PER_M
+        ctx.diagnostics.setdefault("equilibrium_currents_A_per_m", []).append(i0.tolist())
+        tol = float(used.get("equilibrium_rel_tol", 1e-8))
+        opts = dict(absolute_error=1e10, relative_error=tol, maximum_iterations=40)
+        cb = None
+        if case.cryo:
+            cb = lambda _v: relax_mobility("d", "si", opts)
+            if record:
+                ctx.citations += [c for c in self.CRYO_CITATIONS if c not in ctx.citations]
+                ctx.diagnostics["cryo"] = {k: used.get(k) for k in ("Nc_eff_cm3", "Nv_eff_cm3", "Eg_eV",
+                                                                    "extended_precision", "equilibrium_rel_tol")}
+                if tol > 1e-8:
+                    ctx.flags.append(f"newton_rel_tol:{tol:g} (minority-carrier stall at T = {case.T:g} K)")
+                if case.T < 250.0:
+                    ctx.flags.append("cryo_unvalidated: below 250 K checked against closed forms and Charon only, "
+                                     "not against measured devices")
         try:
             if VCB:
-                ramp_bias("d", "collector", VCB, step=0.25, **opts)
+                ramp_bias("d", "collector", VCB, step=0.25, callback=cb, retry_callback=True, **opts)
             for v in VBE:
-                ramp_bias("d", "collector", v + VCB, step=0.1, **opts)
-                ramp_bias("d", "base", v, step=0.05, **opts)
+                ramp_bias("d", "collector", v + VCB, step=0.1, callback=cb, retry_callback=True, **opts)
+                ramp_bias("d", "base", v, step=0.05, callback=cb, retry_callback=True, **opts)
                 rows.append([c * UM for c in _currents()])      # A per um of emitter length, into the device
                 if want_jn:
                     from simws.validation.sige_checks import _jn_intrinsic
                     jn.append(_jn_intrinsic(case))
+                if record and ctx.param("neutral_base_edge", False):
+                    from simws.validation.sige_checks import _neutral_base_edge
+                    ctx.diagnostics.setdefault("_edge", []).append(_neutral_base_edge(case))
+                if ic_max is not None and len(rows) < len(VBE):
+                    # the sweep is bounded by current, not voltage: beyond ic_max the device is in high injection
+                    # / Kirk effect, where self-heating (not modelled here) would dominate anyway. Stop when this
+                    # point, or the next one extrapolated with the ideal slope (a 0.05 V step is x1800 at 77 K),
+                    # exceeds ic_max
+                    ic = rows[-1][0] * A_PER_UM_TO_A_PER_M
+                    nxt = ic * np.exp(min((VBE[len(rows)] - v) / (K_B_EV * case.T), 700.0))
+                    if ic > ic_max or nxt > 10 * ic_max:
+                        if record:
+                            ctx.flags.append(f"sweep_stopped:IC {ic:.3g} A/m at VBE={v:g} V (limit {ic_max:g} A/m)")
+                        break
         except Exception as e:  # DEVSIM raises a generic error on Newton failure
-            if "converge" not in str(e).lower():
+            if not _no_convergence(e):
                 raise
             # partial sweeps are kept when asked (the converged bias range is itself a result), else not_converged
-            if not ctx.param("keep_partial", False) or len(rows) < 2:
-                raise NotConverged(str(e)) from e
+            if not partial_ok or not ctx.param("keep_partial", False) or len(rows) < 2:
+                raise NotConverged(f"mesh_scale {case.mesh_scale:.3g}: {e}" if not partial_ok else str(e)) from e
             ctx.flags.append(f"partial_sweep:no convergence at VBE={VBE[len(rows)]:g} V")
             ctx.diagnostics["converged_points"] = len(rows)
-        ctx.diagnostics["case"] = dataclasses.asdict(case)
-        n = len(rows)
-        return {"VBE": VBE[:n], "I": np.array(rows), "jn": np.array(jn), "T": case.T}
+        return rows, jn
 
     # currents below this are at the Newton-tolerance noise floor (absolute_error 1e10 particles/s per cm of depth in
     # the continuity equations is ~2e-7 A/m; terminal sums of order 1e-9 A/m are seen): dropped, not reported
@@ -127,15 +196,70 @@ class HbtGummel(Adapter):
             from simws.hub.adapter import OutsideValidity
             raise OutsideValidity("no bias point above the current noise floor: raise VBE")
         I, V = I[keep], V[keep]
+        sig = [None] * 4
+        if "I_levels" in raw:
+            sig = self._mesh_uncertainty(ctx, [L[keep] * A_PER_UM_TO_A_PER_M for L in raw["I_levels"]], V)
         ax = [{"name": "VBE", "unit": "V", "values": V.tolist()}]
-        qs = [ctx.quantity("hbt.IC", I[:, 0], "A/m", axes=ax, conventions=CUR),
-              ctx.quantity("hbt.IB", I[:, 1], "A/m", axes=ax, conventions=CUR),
-              ctx.quantity("hbt.IE", I[:, 2], "A/m", axes=ax, conventions=CUR),
-              ctx.quantity("hbt.beta", I[:, 0] / I[:, 1], "dimensionless", axes=ax)]
+        qs = [ctx.quantity("hbt.IC", I[:, 0], "A/m", axes=ax, conventions=CUR, sigma=sig[0]),
+              ctx.quantity("hbt.IB", I[:, 1], "A/m", axes=ax, conventions=CUR, sigma=sig[1]),
+              ctx.quantity("hbt.IE", I[:, 2], "A/m", axes=ax, conventions=CUR, sigma=sig[2]),
+              ctx.quantity("hbt.beta", I[:, 0] / I[:, 1], "dimensionless", axes=ax, sigma=sig[3])]
+        for q in qs:
+            if q.uncertainty.kind == "sigma":
+                q.uncertainty.components["numerical"] = q.uncertainty.sigma
+        edge = ctx.diagnostics.pop("_edge", None)
+        if edge:
+            e = np.asarray(edge)[keep]
+            # uncertainty: the edge is located by interpolation inside one mesh cell; half the change across that
+            # cell, taken as a uniform interval (/sqrt3), bounds the discretisation error
+            u = lambda j: np.abs(e[:, j + 3]) / (2 * 3 ** 0.5)
+            qs += [ctx.quantity("hbt.y_nb_edge", e[:, 0], "um", axes=ax, sigma=u(0)),
+                   ctx.quantity("hbt.ge_nb_edge", e[:, 1], "dimensionless", axes=ax, sigma=u(1)),
+                   ctx.quantity("hbt.dEg_ge_nb_edge", e[:, 2], "eV", axes=ax, sigma=u(2))]
         if len(raw["jn"]):
             qs.append(ctx.quantity("hbt.Jn_intrinsic", np.asarray(raw["jn"])[keep] * 1e4, "A/m**2", axes=ax,
                                    flags=["magnitude"]))
         return qs
+
+    def _mesh_uncertainty(self, ctx, levels, V):
+        """Per-bias GCI (simws.verify.analyse) for IC, IB, IE and beta; returns standard uncertainties (absolute).
+        The GCI is used only when the observed order is plausible (P_MIN <= p <= P_MAX) and the three meshes are
+        near the asymptotic range; otherwise sigma is the conservative bound Fs |f1 - f2| / (r^P_MIN - 1) / k
+        (an order no better than P_MIN assumed), the record says so and the result is flagged
+        'mesh_not_asymptotic'."""
+        from simws.hub import verification as Vf
+        from simws.hub.uncertainty import GCI_COVERAGE_K
+        names = ["hbt.IC", "hbt.IB", "hbt.IE", "hbt.beta"]
+        series = [[L[:, 0] for L in levels], [L[:, 1] for L in levels], [L[:, 2] for L in levels],
+                  [L[:, 0] / L[:, 1] for L in levels]]
+        out, rec = [], {"kind": "solution", "ratio": self.MESH_RATIO, "levels": self.MESH_LEVELS,
+                        "mesh_scales": [self.MESH_RATIO ** -k for k in range(self.MESH_LEVELS)], "quantities": {}}
+        ok = True
+        for name, ser in zip(names, series):
+            sig, per = [], []
+            for j in range(len(V)):
+                vals = [float(abs(s[j])) for s in ser]
+                r = Vf.solution_from_values(list(range(len(vals))), vals, ratio=self.MESH_RATIO)
+                p, ar = r.get("order"), r.get("asymptotic_ratio")
+                good = (r["sigma_num"] is not None and p is not None and self.P_MIN <= p <= self.P_MAX
+                        and ar is not None and 0.5 < ar < 2.0) or (r["sigma_num"] == 0.0)
+                if good:
+                    sg = float(r["sigma_num"])
+                else:
+                    sg = 1.25 * abs(vals[-1] - vals[-2]) / (self.MESH_RATIO ** self.P_MIN - 1) / GCI_COVERAGE_K
+                    ok = False
+                sig.append(sg)
+                per.append({"VBE": float(V[j]), "values_coarse_to_fine": vals, "order": p, "gci_fine": r.get("gci_fine"),
+                            "asymptotic_ratio": ar, "conservative_bound": not good,
+                            "rel_sigma": sg / vals[-1] if vals[-1] else None})
+            rec["quantities"][name] = per
+            out.append(np.array(sig))
+        rec["passed"] = ok
+        ctx.verification["mesh"] = rec
+        if not ok:
+            ctx.flags.append("mesh_not_asymptotic: conservative mesh bound used for some bias points "
+                             "(verification['mesh'])")
+        return out
 
     def self_check(self, job, ctx, qs):
         IC, IB, IE = (qs[i].array() for i in range(3))
@@ -143,7 +267,11 @@ class HbtGummel(Adapter):
         lo, hi = self.IDEALITY_WINDOW_A_PER_M
         win = (IC > lo) & (IC < hi)
         T = ctx.diagnostics["case"]["T"]
-        return G.all_of(G.positive("IC", IC), G.positive("IB", IB),
+        i0 = np.abs(np.asarray(ctx.diagnostics.get("equilibrium_currents_A_per_m", [[0.0]]))).max()
+        detailed_balance = ([] if i0 < self.I_FLOOR_A_PER_M else
+                            [f"zero-bias terminal current {i0:.3g} A/m above the {self.I_FLOOR_A_PER_M:g} A/m floor "
+                             "(Einstein relation / statistics inconsistent)"])
+        return G.all_of(detailed_balance, G.positive("IC", IC), G.positive("IB", IB),
                         G.kirchhoff([IC, IB, IE], rtol=1e-4, atol=1e-8),
                         G.monotonic("IC(VBE)", IC[np.argsort(V)], strict=True) if len(V) > 1 else [],
                         G.ideality("IC", V[win], IC[win], n_min=0.95, n_max=1.3, T=T))

@@ -36,9 +36,49 @@ def default_root() -> Path:
     return ROOT / "store"
 
 
+UNSAFE_FS = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "9p", "drvfs", "fuse", "fuseblk", "fuse.sshfs", "lustre",
+             "gpfs", "beegfs", "virtiofs", "v9fs"}
+
+
+class StoreLocationError(RuntimeError):
+    pass
+
+
+def filesystem_type(path) -> str:
+    """Type of the filesystem holding `path` (longest matching mount point in /proc/mounts); '' if unknown."""
+    p = str(Path(path).resolve())
+    best, typ = "", ""
+    try:
+        for line in Path("/proc/mounts").read_text().splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                mnt = parts[1].replace("\\040", " ")
+                if (p == mnt or p.startswith(mnt.rstrip("/") + "/")) and len(mnt) > len(best):
+                    best, typ = mnt, parts[2]
+    except OSError:
+        pass
+    return typ
+
+
+def check_location(root) -> None:
+    """Refuse network and Windows drives: SQLite's locking and the fcntl commit lock are unreliable there.
+    Set SIMWS_STORE_ALLOW_UNSAFE=1 to override (not recommended)."""
+    if os.environ.get("SIMWS_STORE_ALLOW_UNSAFE") == "1":
+        return
+    r = str(Path(root).resolve())
+    fs = filesystem_type(r)
+    if r.startswith("/mnt/") and len(r) > 5 and r[5:6].isalpha() and (len(r) == 6 or r[6] == "/"):
+        raise StoreLocationError(f"store {r} is on a Windows drive (WSL /mnt/<drive>): keep it on the Linux disk, "
+                                 "e.g. ~/sim_workspace/store")
+    if fs.lower() in UNSAFE_FS or fs.lower().startswith("fuse."):
+        raise StoreLocationError(f"store {r} is on a '{fs}' filesystem, where SQLite and file locks are unsafe")
+
+
 class Store:
     def __init__(self, root=None):
         self.root = Path(root) if root else default_root()
+        self.root.mkdir(parents=True, exist_ok=True)
+        check_location(self.root)
         for d in ("staging", "objects"):
             (self.root / d).mkdir(parents=True, exist_ok=True)
 
