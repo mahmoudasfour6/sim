@@ -203,6 +203,54 @@
     "rtol": 1e-06,
     "value": 3.013682125
   },
+  "simws.hub.dft.PBE.m_l": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 0.9574340981119236
+  },
+  "simws.hub.dft.PBE.m_t": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 0.19325294428996792
+  },
+  "simws.hub.dft.pseudodojo.PBE.m_l": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 0.9574340981324466
+  },
+  "simws.hub.dft.pseudodojo.PBE.m_t": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 0.19325294428890408
+  },
+  "simws.hub.mms.poisson_order": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 2.0001073893456014
+  },
+  "simws.hub.sige.IC_ratio_0.6V": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 6.011728639488694
+  },
+  "simws.hub.sige.strike_QC_let0.1_fC": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": 1.2884773370078897
+  },
+  "simws.hub.tid.tox20.dVmg_1Mrad_V": {
+    "atol": 0.0,
+    "recorded": "2026-11-03",
+    "rtol": 1e-06,
+    "value": -0.43353233453088547
+  },
   "simws.models.breakdown_V_devsim": {
     "atol": 0.0,
     "recorded": "2026-11-01",

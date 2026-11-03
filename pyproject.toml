@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simws"
-version = "0.7.0"
+version = "0.8.0"
 description = "Shared physics parameters, field I/O and coupling layer for the sim_workspace toolchain"
 requires-python = ">=3.10"
 dependencies = ["numpy", "pyyaml", "pint"]
@@ -12,6 +12,7 @@ dependencies = ["numpy", "pyyaml", "pint"]
 [project.optional-dependencies]
 coupling = ["scipy", "scikit-fem", "meshio"]
 uq = ["scipy"]
+hub = ["pydantic>=2.5,<3", "networkx>=3.1"]
 
 [tool.setuptools.packages.find]
 include = ["simws*"]
@@ -19,3 +20,4 @@ include = ["simws*"]
 [tool.setuptools.package-data]
 "simws.materials" = ["data/*.yaml", "data/computed/*.yaml"]
 "simws.dft" = ["pseudo/*.UPF", "pseudo/README.md"]
+"simws.studies" = ["specs/*.yaml"]

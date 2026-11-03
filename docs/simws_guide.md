@@ -175,6 +175,68 @@ $W/snakemake paper --cores 12 --resources mem_mb=20000     # everything + figure
 - Not covered yet: Ge band edges (PBE closes the Ge gap; needs a hybrid or GW start), SiGe alloy band offsets
   from supercells, defect levels.
 
+## simws 0.8: the hub (core contract)
+
+Every calculation now has an identity, a home and a history. `notebooks/hub_tour.ipynb` walks through it.
+
+- **Submit through the hub** (`simws.hub.jobs.Hub`): `hub.submit("devsim.hbt_gummel", params={"VBE": (V, "V"),
+  "T": (350, "K")})`. The job key (SHA-256 of the canonical inputs: SI base units except eV and MeV cm2/mg,
+  adapter and engine version, env lock hash, member, seed) is the job's identity, so 300 K and 0.3 kK are the
+  same job and a repeated submit is served from the store. Defaults that change the answer (pseudopotential files
+  and their hashes, cut-offs) are pinned into the key at submit time.
+- **Adapters** (`simws/adapters`): `materials.intrinsic`, `devsim.hbt_gummel`, `devsim.mos_cv`,
+  `devsim.strike_hbt`, `devsim.mms_poisson`, `radiation.tid_mos`, `radiation.ser_rate`, `dft.si_bandedge`. Each
+  runs as its own process in its conda env (`python -m simws.run`), converts to the canonical conventions at its
+  boundary (passive current sign, tensile stress, engineering shear, dose in Gy(material), ...: `simws.conventions`)
+  and runs physics guards (Kirchhoff, mass action, ideality, monotonicity, charge conservation).
+- **Gatekeeper** (`simws.hub.gatekeeper`): declared outputs present, units of the right dimension, finite values,
+  canonical conventions, fields on disk. Results outside the validity box are kept and flagged `extrapolated`;
+  screening results without an uncertainty are flagged `unverified`; paper fidelity refuses them. Every failure
+  lands in one category: not_converged, timeout, out_of_memory, invalid_input, outside_validity, engine_error,
+  check_failed.
+- **Store and knowledge graph** (`store/`, git-ignored): immutable result objects (`objects/<id>/envelope.json`)
+  plus `graph.sqlite` with Job, Result and Quantity nodes, produced / consumed / depends_on / supersedes edges and
+  an event ledger. `hub.graph.ancestors(...)`, `hub.graph.is_stale(...)`, `hub.graph.to_networkx()`.
+- **Uncertainty** (`simws.hub.uncertainty`): member IDs (`functional=PBE|sample=3`) keep ensembles correlated across
+  quantities; `budget()` combines numerical (GCI/2), parametric (sample spread) and model-form (range/sqrt 12)
+  parts and names the dominant one. **Verification** records (`simws.hub.verification`): solution (refinement
+  study, GCI) and code (manufactured solutions, closed forms).
+- **Code verification**: the production Poisson-Boltzmann discretisation, driven by a manufactured solution through
+  the same `extra_charge` hook the oxide charge uses, converges at order 2.0001 (`simws.tcad.mms`).
+- **Upgrade gate** (rule `hub_gate`, slow tests `test_simws_hub_gate_*`): the hub reproduces the 0.7 results it
+  wraps to round-off: TID midgap shift at 1 Mrad, SiGe collector enhancement at 0.6 V, HBT strike charge
+  (largest relative difference 4e-15) and the PBE electron masses (identical).
+- **Material laws** (`simws.materials.laws`): parameters as functions of T with validity boxes (Si gap 0-1000 K,
+  mobility 200-500 K, n_i 250-400 K, k 300-600 K); 4H-SiC laws report `validity_unknown` until their fit ranges
+  are checked. New sets: `al2o3`, `hfo2` (Robertson 2004, provisional until checked against the primary source)
+  and `interfaces.yaml` (Si/SiO2 D_it and Q_f, 4H-SiC/SiO2 D_it, Ni/4H-SiC barrier) as literature
+  distributions: `laws.sample_interface(...)`.
+- **PseudoDojo**: `tools/fetch_pseudodojo.sh` installs the PseudoDojo v0.4 ONCVPSP set and `dft.pseudo_set:
+  pseudodojo` makes it the default (cut-off 48 Ry, the table's high hint). If only the fully relativistic PBE file
+  could be fetched it also serves the scalar runs (flag `pseudodojo_fr_as_scalar`); if nothing could be fetched the
+  bundled set stays and DFT results carry `pseudos:bundled`. The 0.7 golden test stays pinned to the bundled set;
+  `test_simws_pseudodojo_vs_bundled` compares the two (masses 3 %, conduction minimum 1 %, gap 50 meV). Reference run (PBE, PseudoDojo
+  fully relativistic file used for the scalar runs): m_l 0.957 vs 0.961, m_t 0.193 vs 0.195, conduction minimum
+  0.841 vs 0.842 of Gamma-X, DFT gap 0.554 vs 0.583 eV.
+- **Citations** (`simws.hub.citations`): every result carries its adapter's keys; `bibliography(results)` prints
+  the list or BibTeX. Entries are marked unchecked until confirmed against the publisher record.
+- **Overnight queue**: `python -m simws.queue add <adapter> --params '{...}'`, `python -m simws.queue run --until
+  06:30`; interrupted entries are re-queued and committed results are never recomputed. The nightly task runs
+  the queue, then `python -m simws.hub.maintain` (prunes large `until_validated` fields once every consumer has
+  passed, writes `store/reports/disk_<date>.json`, warns above 80 % disk).
+- **Flagship study A** (`simws/studies/specs/flagship_a.yaml`, rule `flagship_a` in `studies`): SiGe HBT vs Si BJT,
+  77-400 K, screening fidelity. First run (current gain at 1 A/m, i.e. 1 uA per um of emitter):
+  SiGe 106 -> 68 and Si 15 -> 21 from 250 to 400 K (the SiGe gain falls and the Si gain rises with temperature,
+  as H2 states); collector-current ratio at 0.6 V 9.2, 5.7, 4.0, 3.1 at 250, 300, 350, 400 K. That ratio follows
+  B exp(dE/kT) with dE = 63 meV (rms log residual 0.006), while the graded-only form x/(1 - e^-x) does not fit
+  (0.24): H1 as written is rejected. Likely reason, to test in 0.9: the emitter-base depletion pushes the neutral
+  base edge into Ge-containing material, so an abrupt offset term adds to the grading (the 0.6 ideality check
+  points the same way). Below 250 K everything is flagged extrapolated; the SiGe device does not reach
+  equilibrium at 77 K (not_converged) and the Si BJT gain there is 0.2, which needs the cryogenic models before it
+  means anything.
+- Not covered yet: strain and dose in the material laws (0.12), the field store with conservative transfer, paper
+  fidelity for devices (mesh-refinement GCI per result), freeze-out and low-temperature mobility (cryogenic package).
+
 ## Single-event upset example
 
 ```python

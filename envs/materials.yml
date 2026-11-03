@@ -310,6 +310,8 @@ dependencies:
       - emmet-core==0.87.3
       - executing==2.3.0
       - filelock==4.2.6
+      - flexcache==0.3
+      - flexparser==0.4
       - fsspec==2026.9.0
       - gitdb==4.0.12
       - gitpython==3.2.1
@@ -350,6 +352,7 @@ dependencies:
       - pexpect==4.9.0
       - phonopy==4.8.6
       - phonors==0.6.0
+      - pint==0.25.3
       - platformdirs==4.14.2
       - prettytable==3.18.0
       - prompt-toolkit==3.0.53

@@ -30,6 +30,19 @@ from simws.dft import bandedge, qe, strain
 
 A_EXP_SI = 5.431
 BUNDLED = Path(__file__).resolve().parents[1] / "dft" / "pseudo"
+# PseudoDojo v0.4 norm-conserving (ONCVPSP) set, fetched by tools/fetch_pseudodojo.sh; cutoff = the table's
+# 'high' hint for Si (24 Ha = 48 Ry, Si.djrepo)
+PSEUDODOJO_ECUT_RY = 48.0
+
+
+def pseudodojo_dir() -> Optional[Path]:
+    """Directory of the installed PseudoDojo Si files (Si.pbe.upf and/or Si_r.pbe.upf), or None."""
+    from simws.config import ROOT, load as cfg
+    base = Path(os.path.expanduser(cfg().get("data", {}).get("pseudopotentials", "sim_data/pseudopotentials")))
+    if not base.is_absolute():
+        base = Path(cfg().get("workspace_root", ROOT)) / base
+    p = base / "pseudodojo_v0.4"
+    return p if (p / "Si.pbe.upf").is_file() or (p / "Si_r.pbe.upf").is_file() else None
 
 
 @dataclasses.dataclass
@@ -38,6 +51,9 @@ class Config:
     pbe: str                                  # scalar (or fully-relativistic) PBE pseudopotential for Si
     pbe_fr: Optional[str] = None              # fully-relativistic PBE (spin-orbit); None -> no SOC quantities
     lda: Optional[str] = None                 # LDA pseudopotential; None -> PBE pseudopotential + input_dft
+    pbesol: Optional[str] = None              # PBEsol pseudopotential; None -> PBE pseudopotential + input_dft
+    pseudo_set: str = "custom"                # bundled | pseudodojo | custom (dft.pseudo_dir)
+    flags: tuple = ()                         # e.g. ('pseudodojo_missing',) when the requested set was not found
     ecutwfc: float = 40.0
     ranks: int = 1
     functionals: tuple = ("PBE", "LDA", "PBEsol")
@@ -46,7 +62,7 @@ class Config:
     chgnet: bool = True
 
     @classmethod
-    def from_workspace(cls, ranks=None):
+    def from_workspace(cls, ranks=None, pseudo_set=None):
         """Settings from config.yaml (dft: pseudo_dir, pseudos, ecutwfc, ranks, hse_kgrids). Without dft.pseudo_dir
         the pseudopotentials shipped in simws/dft/pseudo are used (the validated set); with it, the files named in
         dft.pseudos, or ones picked by name from that directory."""
@@ -57,8 +73,21 @@ class Config:
         ranks = int(ranks or d.get("ranks", c.get("threads", {}).get("mpi_ranks", 1)))
         common = dict(ecutwfc=float(d.get("ecutwfc", 40.0)), ranks=ranks,
                       hse_kgrids=tuple(tuple(k) for k in d.get("hse_kgrids", [[4, 4, 4]])))
-        if not d.get("pseudo_dir"):
-            return cls(str(BUNDLED), "Si.pbe-rrkj.UPF", "Si.rel-pbe-rrkj.UPF", "Si.pz-vbc.UPF", **common)
+        want = pseudo_set or os.environ.get("SIMWS_DFT_PSEUDOS") or d.get("pseudo_set") or "bundled"
+        flags = ()
+        if want == "pseudodojo":
+            pd = pseudodojo_dir()
+            if pd is not None:
+                f = lambda n: n if (pd / n).is_file() else None
+                common["ecutwfc"] = float(d.get("ecutwfc_pseudodojo", PSEUDODOJO_ECUT_RY))
+                pbe, fl = (("Si.pbe.upf", ()) if f("Si.pbe.upf") else ("Si_r.pbe.upf", ("pseudodojo_fr_as_scalar",)))
+                return cls(str(pd), pbe, f("Si_r.pbe.upf"), f("Si.pw.upf"), f("Si.pbesol.upf"),
+                           pseudo_set="pseudodojo", flags=fl, **common)
+            flags = ("pseudodojo_missing",)      # requested but not installed: bundled set used, flagged
+            want = "bundled"
+        if want == "bundled" or not d.get("pseudo_dir"):
+            return cls(str(BUNDLED), "Si.pbe-rrkj.UPF", "Si.rel-pbe-rrkj.UPF", "Si.pz-vbc.UPF",
+                       pseudo_set="bundled", flags=flags, **common)
         pdir = str(Path(os.path.expanduser(d["pseudo_dir"])).resolve())
         names = sorted(p.name for p in Path(pdir).iterdir() if p.is_file())
         pick = lambda f: next((n for n in names if f(n.lower())), None)
@@ -79,6 +108,8 @@ class Config:
                 return self.lda, None, self.pbe_fr, ("pz" if self.pbe_fr else None)
             return self.pbe, "pz", self.pbe_fr, ("pz" if self.pbe_fr else None)
         if functional == "PBEsol":
+            if self.pbesol:
+                return self.pbesol, None, self.pbe_fr, ("pbesol" if self.pbe_fr else None)
             return self.pbe, "pbesol", self.pbe_fr, ("pbesol" if self.pbe_fr else None)
         raise ValueError(functional)
 

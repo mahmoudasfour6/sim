@@ -47,6 +47,7 @@ rule all:
         f"{RES}/mos/summary.json",
         f"{RES}/sic/sic_checks.json",
         f"{RES}/sige/sige_checks.json",
+        f"{RES}/hub/gate/hub_gate_devices.json",
 
 # Heavier studies, run on demand or by the nightly job:  snakemake --cores 12 studies
 rule studies:
@@ -60,6 +61,7 @@ rule studies:
         f"{RES}/mos_variability/summary.json",
         f"{RES}/sige/devices.json",
         f"{RES}/dft/checks.json",
+        f"{RES}/flagship_a/flagship_a.json",
 
 
 rule materials_table:
@@ -292,6 +294,35 @@ rule dft_params:
     params: py=py(DFT_ENV), env=threads_env(1), out=f"{RES}/dft"
     log: "logs/dft_params.log"
     shell: "{params.env} {params.py} workflow/scripts/dft_params.py --outdir {params.out} --ranks {threads} > {log} 2>&1"
+
+
+# ---- simws 0.8 hub: every job through the content-addressed store and knowledge graph (store/ by default)
+HUB_SRC = ["simws/hub/schema.py", "simws/hub/canonical.py", "simws/hub/store.py", "simws/hub/graph.py",
+           "simws/hub/gatekeeper.py", "simws/hub/adapter.py", "simws/hub/jobs.py", "simws/conventions.py",
+           "simws/adapters/tcad.py", "simws/adapters/radiation.py"]
+
+
+rule hub_gate:
+    input: HUB_SRC + SIGE_SRC + ["workflow/scripts/hub_gate.py", "simws/tcad/mms.py"]
+    output: f"{RES}/hub/gate/hub_gate_devices.json"
+    threads: 1
+    resources: mem_mb=1500
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/hub/gate"
+    log: "logs/hub_gate.log"
+    shell: "rm -rf {params.out}/store; {params.env} {params.py} workflow/scripts/hub_gate.py --part devices --outdir {params.out} > {log} 2>&1"
+
+
+FLAGSHIP_A_SRC = ["simws/studies/flagship_a.py", "simws/studies/specs/flagship_a.yaml", "workflow/scripts/flagship_a.py"]
+
+
+rule flagship_a:
+    input: HUB_SRC + SIGE_SRC + FLAGSHIP_A_SRC
+    output: f"{RES}/flagship_a/flagship_a.json", f"{RES}/flagship_a/flagship_a_table.txt"
+    threads: 1
+    resources: mem_mb=1500
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/flagship_a"
+    log: "logs/flagship_a.log"
+    shell: "{params.env} {params.py} workflow/scripts/flagship_a.py --outdir {params.out} > {log} 2>&1"
 
 
 rule paper:

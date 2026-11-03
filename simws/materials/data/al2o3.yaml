@@ -1,0 +1,8 @@
+# Amorphous Al2O3 gate/passivation dielectric (ALD). Values for oxide stacks on Si and SiC.
+name: al2o3
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:     {value: 9.0,  unit: dimensionless, ref: "Robertson, Eur. Phys. J. Appl. Phys. 28, 265 (2004), Table 1; also J. Vac. Sci. Technol. B 18, 1785 (2000). Checked here only against a secondary tabulation (Liao, Practical Electron Microscopy and Database, 2006, table 2076)", status: provisional}
+  Eg:        {value: 8.8,  unit: eV,            ref: "Robertson (2004), Table 1 (as above)", status: provisional}
+  cbo_on_si: {value: 2.8,  unit: eV,            ref: "conduction-band offset to Si, Robertson (2004), Table 1 (as above); ALD films vary +-0.3 eV with process", status: provisional}
+profiles: {}

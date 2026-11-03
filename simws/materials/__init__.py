@@ -30,6 +30,7 @@ import yaml
 from simws.units import Q_, ureg
 
 _DATA = "data"
+_NOT_MATERIALS = {"interfaces.yaml"}     # interface distributions: simws.materials.laws
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,8 @@ class Material:
 
 
 def available():
-    return sorted(p.name[:-5] for p in resources.files(__package__).joinpath(_DATA).iterdir() if p.name.endswith(".yaml"))
+    return sorted(p.name[:-5] for p in resources.files(__package__).joinpath(_DATA).iterdir()
+                  if p.name.endswith(".yaml") and p.name not in _NOT_MATERIALS)
 
 
 def _computed_profile(name, profile, computed_dir):

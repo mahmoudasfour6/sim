@@ -25,8 +25,14 @@ event_seu_count: 12          # events per ion that each get a DEVSIM run
 
 # --- first-principles parameters (simws 0.7): rule dft_params (in `studies`)
 dft:
+  pseudo_set: pseudodojo  # bundled = the 0.7 set in simws/dft/pseudo; pseudodojo = sim_data/pseudopotentials/pseudodojo_v0.4
   env: materials             # conda env with pw.x (Quantum ESPRESSO); CHGNet benchmark runs if chgnet imports there
   pseudo_dir: ""             # empty = the validated set shipped in simws/dft/pseudo; else a directory plus:
   pseudos: {}                #   Si_pbe, Si_pbe_fr (fully relativistic, for spin-orbit), Si_lda
   ecutwfc: 40.0
   hse_kgrids: [[4, 4, 4]]    # add [6, 6, 6] for the hybrid-gap convergence check (about 20x slower)
+
+# --- simws 0.8 hub: content-addressed store + knowledge graph. Default: <workspace>/store (git-ignored; every
+# result can be regenerated from its job key). Override with an absolute path here or SIMWS_STORE.
+# hub:
+#   store: /home/<you>/sim_workspace/store

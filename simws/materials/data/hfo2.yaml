@@ -1,0 +1,8 @@
+# HfO2 high-k gate dielectric. Values for oxide stacks on Si.
+name: hfo2
+reference_temperature: {value: 300, unit: K}
+parameters:
+  eps_r:     {value: 25.0, unit: dimensionless, ref: "Robertson, Eur. Phys. J. Appl. Phys. 28, 265 (2004), Table 1; also J. Vac. Sci. Technol. B 18, 1785 (2000). Checked here only against a secondary tabulation (Liao, Practical Electron Microscopy and Database, 2006, table 2076); monoclinic films are nearer 16-20", status: provisional}
+  Eg:        {value: 5.8,  unit: eV,            ref: "Robertson (2004), Table 1 (as above)", status: provisional}
+  cbo_on_si: {value: 1.4,  unit: eV,            ref: "conduction-band offset to Si, Robertson (2004), Table 1 (as above)", status: provisional}
+profiles: {}

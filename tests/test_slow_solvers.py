@@ -368,7 +368,7 @@ def test_simws_dft_params_quick(tmp_path, golden):
     import yaml as _y
     env = _y.safe_load((REPO / "config" / "config.yaml").read_text()).get("dft", {}).get("env", "materials")
     run_in_env(env, [env_python(env), REPO / "workflow" / "scripts" / "dft_params.py", "--outdir", tmp_path, "--quick",
-                     "--ranks", "4"], REPO, timeout=3600, threads=1, extra_env=_simws_env())
+                     "--ranks", "4"], REPO, timeout=3600, threads=1, extra_env={**_simws_env(), "SIMWS_DFT_PSEUDOS": "bundled"})
     p = json.loads((tmp_path / "params.json").read_text())["results"]["parameters"]
     c = json.loads((tmp_path / "checks.json").read_text())["results"]
     # PBE alone (quick mode) is known to be soft: the C_ij tolerances apply to the ensemble mean (full rule)
@@ -377,3 +377,50 @@ def test_simws_dft_params_quick(tmp_path, golden):
     assert c["intrinsic"]["pass"] and c["gap"]["pass"] and c["elastic_consistency"]["pass"], c
     golden.verify({"simws.dft.PBE.m_l": p["m_l"]["value"], "simws.dft.PBE.m_t": p["m_t"]["value"],
                    "simws.dft.PBE.Nc_300": p["Nc_300"]["value"], "simws.dft.PBE.Nv_300": p["Nv_300"]["value"]})
+
+
+# --------------------------------------------------------------------------- simws 0.8 (hub core contract)
+def test_simws_hub_connections_in_tcad_env():
+    """Connection tests (producer -> consumer hand-overs) in the tcad env, where every engine exists."""
+    out = run_in_env("tcad", [env_python("tcad"), "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=",
+                              "tests/connections"], REPO, timeout=1800, extra_env=_simws_env())
+    assert re.search(r"\d+ passed", out) and "skipped" not in out and "failed" not in out, out[-1500:]
+
+
+def test_simws_hub_gate_devices(tmp_path, golden):
+    """Upgrade gate: hub results equal the direct 0.7 calls (TID, SiGe enhancement, HBT strike) to round-off."""
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "hub_gate.py", "--part", "devices",
+                        "--outdir", tmp_path], REPO, timeout=3600, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "hub_gate_devices.json").read_text())
+    assert r["pass"], r
+    golden.verify({"simws.hub.tid.tox20.dVmg_1Mrad_V": r["tid.tox20.dVmg_1Mrad_V"]["hub"],
+                   "simws.hub.sige.IC_ratio_0.6V": r["sige.IC_ratio_0.6V"]["hub"],
+                   "simws.hub.sige.strike_QC_let0.1_fC": r["sige.strike_QC_let0.1_fC"]["hub"],
+                   "simws.hub.mms.poisson_order": r["mms.poisson_order"]["hub"]})
+
+
+def test_simws_hub_gate_dft(tmp_path, golden):
+    """Upgrade gate, first-principles part: dft.si_bandedge (PBE member) equals a direct band-edge run."""
+    import yaml as _y
+    env = _y.safe_load((REPO / "config" / "config.yaml").read_text()).get("dft", {}).get("env", "materials")
+    run_in_env(env, [env_python(env), REPO / "workflow" / "scripts" / "hub_gate.py", "--part", "dft",
+                     "--outdir", tmp_path, "--ranks", "4"], REPO, timeout=7200, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "hub_gate_dft.json").read_text())
+    assert r["pass"], r
+    golden.verify({"simws.hub.dft.PBE.m_l": r["dft.PBE.m_l"]["hub"], "simws.hub.dft.PBE.m_t": r["dft.PBE.m_t"]["hub"]})
+
+
+def test_simws_pseudodojo_vs_bundled(tmp_path, golden):
+    """The 0.7 Si re-run with the PseudoDojo set: same PBE band edges as the bundled set within physics tolerances
+    (masses 3 %, conduction-minimum position 1 %, gap 50 meV)."""
+    import yaml as _y
+    if not (REPO / "sim_data" / "pseudopotentials" / "pseudodojo_v0.4").is_dir():
+        import pytest as _pt
+        _pt.skip("PseudoDojo set not installed (tools/fetch_pseudodojo.sh)")
+    env = _y.safe_load((REPO / "config" / "config.yaml").read_text()).get("dft", {}).get("env", "materials")
+    run_in_env(env, [env_python(env), REPO / "workflow" / "scripts" / "hub_gate.py", "--part", "pseudos",
+                     "--outdir", tmp_path, "--ranks", "4"], REPO, timeout=4 * 3600, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "hub_gate_pseudos.json").read_text())
+    assert r["pass"], r
+    golden.verify({"simws.hub.dft.pseudodojo.PBE.m_l": r["pseudos.dft.m_l"]["pseudodojo"],
+                   "simws.hub.dft.pseudodojo.PBE.m_t": r["pseudos.dft.m_t"]["pseudodojo"]})

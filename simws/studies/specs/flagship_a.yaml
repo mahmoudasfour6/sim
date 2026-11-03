@@ -1,0 +1,42 @@
+# Flagship study A: the temperature window of a SiGe HBT, 77-400 K (simws 0.8 screening; paper fidelity in 0.9+).
+id: flagship_a
+version: 1
+question: >
+  How do current gain, collector-current enhancement and the turn-on voltage of a graded-base SiGe HBT change from
+  liquid-nitrogen to hot-ambient temperature, compared with an identical Si BJT, and which physical mechanism
+  sets each trend?
+hypotheses:
+  - id: H1
+    statement: >
+      The SiGe/Si collector-current ratio at fixed V_BE grows on cooling as the graded-base form
+      x / (1 - exp(-x)), x = dEg_grade / kT (linear in 1/T at low T), not as exp(dEg / kT), because the Ge
+      fraction is zero at the emitter edge of the base and only the grade-induced drift field helps.
+    mechanism: Ge-induced valence-band offset grading across the base (Kroemer / Moll-Ross integral).
+    observable: hbt.IC ratio SiGe/Si at fixed VBE; fitted dEg_grade must be the same at every T
+  - id: H2
+    statement: Si BJT gain falls on cooling while SiGe HBT gain rises, because emitter band-gap narrowing works
+      against the Si device and the base Ge grading for the SiGe device.
+    observable: hbt.beta at fixed collector current density
+  - id: H3
+    statement: The collector-current slope stays ideal (n = 1) across the window; departures mark the onset of
+      high injection or of the extrapolated physics below 250 K.
+    observable: Gummel slope of hbt.IC
+devices:
+  si_bjt:  {adapter: devsim.hbt_gummel, case: {ge_peak: 0.0}}
+  sige_hbt: {adapter: devsim.hbt_gummel, case: {ge_peak: 0.15}}
+sweep:
+  T_K: [77, 150, 200, 250, 300, 350, 400]
+  VBE_V: {start: 0.40, stop: 1.10, step: 0.05}
+compare_at:
+  VBE_V: 0.60                  # for the enhancement ratio (cold devices: the lowest common bias above the current floor)
+  JC_A_per_m: 1.0              # collector current per m of emitter length for beta (1 uA/um)
+validity:
+  # from the adapter manifest and the material laws: mobility T laws 200-500 K, n_i(T) 250-400 K
+  trusted_T_K: [250, 400]
+  note: below 250 K results are produced but flagged 'extrapolated'; 77 K additionally needs freeze-out and
+        low-temperature mobility models that 0.8 does not have (planned for the cryogenic package)
+fidelity: screening
+uncertainty:
+  screening: none (results flagged 'unverified')
+  paper: [numerical (mesh refinement, GCI), parametric (Masetti and SiGe offset parameters), model_form (BGN model)]
+outputs: [table, figure, graph lineage]

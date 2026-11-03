@@ -16,10 +16,14 @@ mkdir -p results/nightly
   echo "== workflow (cores=$CORES mem_mb=$MEM)"
   $E/workflow/bin/snakemake paper --cores $CORES --resources mem_mb=$MEM -q 2>&1 | tail -5; wf=${PIPESTATUS[0]}
   echo "== results"; $E/workflow/bin/python tools/summarize_results.py
+  echo "== hub queue (overnight jobs; none started after 06:30)"
+  PYTHONPATH=. $E/workflow/bin/python -m simws.queue run --until 06:30 2>&1 | tail -3; q=${PIPESTATUS[0]}
+  echo "== store maintenance (retention prune + disk report)"
+  PYTHONPATH=. $E/workflow/bin/python -m simws.hub.maintain 2>&1 | tail -2
   if git remote | grep -qx offsite; then
     echo "== off-laptop backup"; git push -q offsite --all 2>&1 | tail -2; echo "  pushed $(git rev-parse --short HEAD)"
   fi
-  echo "== summary: fast=$fast slow=$slow workflow=$wf (0 = pass)"
+  echo "== summary: fast=$fast slow=$slow workflow=$wf queue=${q:-0} (0 = pass)"
 } > "$LOG" 2>&1
 tail -1 "$LOG" > results/nightly/LATEST.txt
 cp "$LOG" "/mnt/c/Users/$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')/sim_backup/nightly_latest.log" 2>/dev/null || true

@@ -333,6 +333,7 @@ dependencies:
   - zlib-ng=2.3.3=hce19668_1
   - zstd=1.5.7=hb78ec9c_7
   - pip:
+      - annotated-types==0.8.0
       - asteval==1.0.10
       - asttokens==3.0.2
       - backports-shutil-get-terminal-size==1.0.0
@@ -370,6 +371,8 @@ dependencies:
       - ptyprocess==0.7.0
       - pure-eval==0.2.4
       - pyarrow==26.0.0
+      - pydantic==2.14.2
+      - pydantic-core==2.50.2
       - pytest==9.2.0
       - pyyaml==6.0.3
       - pyzmq==27.2.0
@@ -381,6 +384,7 @@ dependencies:
       - semver==3.1.0
       - stack-data==0.6.3
       - traitlets==5.16.1
+      - typing-inspection==0.4.4
       - uncertainties==3.2.3
       - urllib3==2.8.0
       - verilogae==1.0.0

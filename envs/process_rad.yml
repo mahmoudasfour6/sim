@@ -303,6 +303,7 @@ dependencies:
   - pip:
       - about-time==4.2.1
       - alive-progress==3.3.0
+      - annotated-types==0.8.0
       - attrs==26.1.0
       - autograd==1.9.1
       - cffi==2.1.1
@@ -325,10 +326,13 @@ dependencies:
       - moocore==0.3.2
       - narwhals==2.28.0
       - nest-asyncio2==1.7.4
+      - networkx==3.6.1
       - orjson==3.13.0
       - pint==0.25.3
       - platformdirs==4.14.2
       - pycparser==3.12
+      - pydantic==2.14.2
+      - pydantic-core==2.50.2
       - pydoe==1.6.0
       - pymoo==0.6.2
       - pysrim==0.5.10
@@ -339,6 +343,7 @@ dependencies:
       - smt==2.15.0
       - spacepy==0.7.0
       - threadpoolctl==3.7.0
+      - typing-inspection==0.4.4
       - viennals==5.10.0
       - viennaps==4.7.0
       - wrapt==2.5.2
