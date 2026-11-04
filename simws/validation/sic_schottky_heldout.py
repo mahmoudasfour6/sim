@@ -103,27 +103,63 @@ def fit(meta, data):
             "rms_ln_fit": float(np.sqrt(np.mean(sol.fun ** 2))), "n_points": int(len(d))}
 
 
+# ---------------------------------------------------------------------------------------------- protocol 2
+# Fixed on 2026-11-05, after protocol 1 (Vivona 2020) failed in the series-resistance knee and BEFORE the second
+# dataset was opened (see data/sic_schottky/PREREGISTRATION_2.md). Changes from protocol 1: the split comes from a
+# rule applied to the temperatures in the data; the held-out window ends where the fitted series-resistance drop
+# reaches kT/q; each held-out temperature needs >= 10 points in its window, otherwise the gate is inconclusive.
+MIN_POINTS_2 = 10
+
+
+def split_rule_2(temps):
+    """Fit at the lowest temperature and at the one closest to the middle of the measured range (excluding the
+    lowest); hold out every other temperature."""
+    T = sorted(set(float(t) for t in temps))
+    if len(T) < 3:
+        raise ValueError(f"protocol 2 needs >= 3 temperatures, the data has {len(T)}")
+    mid = 0.5 * (T[0] + T[-1])
+    second = min(T[1:], key=lambda t: (abs(t - mid), t))
+    fit_T = [T[0], second]
+    return fit_T, [t for t in T if t not in fit_T]
+
+
+def window_2(T, p):
+    """Held-out window of protocol 2 in current density (A/cm^2): from 1e-7 to where J R_s = kT/q (capped at 1e-1)."""
+    kT = K_B_EV * T
+    return J_WINDOW[0], min(J_WINDOW[1], kT / max(p["R_s_ohm"], 1e-30))
+
+
 def predict(meta, data, p):
     A = meta.get("area_cm2", 1.0)
+    proto = int(meta.get("protocol", 1))
     rows, worst = [], 0.0
     for T in meta["heldout_T_K"]:
         m = data[:, 0] == T
         V, I = data[m, 1], data[m, 2]
         Ip = current(V, T, p["phi_B0_eV"], p["sigma_s_eV"], p["R_s_ohm"], meta["N_D_cm3"], A)
-        inwin = (I / A > J_WINDOW[0]) & (I / A < J_WINDOW[1])
+        lo, hi = window_2(T, p) if proto == 2 else J_WINDOW
+        inwin = (I / A > lo) & (I / A < hi)
         ln = np.abs(np.log(Ip[inwin] / I[inwin]))
         w = float(ln.max()) if ln.size else float("nan")
         worst = max(worst, w) if ln.size else worst
-        rows.append({"T_K": T, "n_points": int(inwin.sum()), "max_abs_ln_ratio": w,
+        rows.append({"T_K": T, "n_points": int(inwin.sum()), "max_abs_ln_ratio": w, "window_A_cm2": [lo, hi],
                      "max_ratio": float(math.exp(w)) if ln.size else None})
-    return {"rows": rows, "worst_abs_ln_ratio": worst, "tolerance_abs_ln": TOL_LN,
-            "pass": bool(worst < TOL_LN and all(r["n_points"] > 0 for r in rows))}
+    need = MIN_POINTS_2 if proto == 2 else 1
+    conclusive = all(r["n_points"] >= need for r in rows)
+    return {"rows": rows, "worst_abs_ln_ratio": worst, "tolerance_abs_ln": TOL_LN, "protocol": proto,
+            "conclusive": bool(conclusive), "pass": bool(conclusive and worst < TOL_LN)}
 
 
 def run(name) -> dict:
     meta, data = load(name)
     if not meta.get("approved"):
         raise PermissionError(f"dataset {name}: not approved for the held-out gate (meta.json 'approved')")
+    if int(meta.get("protocol", 1)) == 2:
+        fit_T, held_T = split_rule_2(data[:, 0])
+        for key, v in (("fit_T_K", fit_T), ("heldout_T_K", held_T)):
+            if key in meta and sorted(meta[key]) != sorted(v):
+                raise ValueError(f"protocol 2: meta {key} {meta[key]} differs from the rule's {v}")
+        meta = {**meta, "fit_T_K": fit_T, "heldout_T_K": held_T}
     overlap = set(meta["fit_T_K"]) & set(meta["heldout_T_K"])
     if overlap:
         raise ValueError(f"fit and held-out temperatures overlap: {sorted(overlap)}")

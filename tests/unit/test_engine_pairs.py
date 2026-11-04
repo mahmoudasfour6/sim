@@ -40,3 +40,12 @@ def test_sic_heldout_refuses_unapproved(tmp_path, monkeypatch):
     monkeypatch.setattr(H, "DATA", tmp_path)
     with pytest.raises(PermissionError):
         H.run("x")
+
+
+def test_sic_protocol2_split_rule():
+    from simws.validation import sic_schottky_heldout as H
+    assert H.split_rule_2([298.15, 323.15, 348.15, 373.15, 398.15]) == ([298.15, 348.15], [323.15, 373.15, 398.15])
+    with pytest.raises(ValueError):
+        H.split_rule_2([300.0, 400.0])
+    lo, hi = H.window_2(300.0, {"R_s_ohm": 2.0})
+    assert lo == 1e-7 and abs(hi - 0.025852 / 2.0) < 1e-4
