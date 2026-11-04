@@ -65,44 +65,70 @@ def _edges(eig, nocc):
             "cbm_k_tpiba": float(_klist()[int(np.argmin(cb.min(axis=1))), 2])}
 
 
-def dft_engine(engine, work, ecut_Ry=40.0, ecut_eV=500.0, kgrid=(8, 8, 8)) -> dict:
-    """One engine's side of the DFT pair (cached in <work>/<engine>.json): EOS on the shared a grid and band
-    energies at a = 5.431 A on the shared k list."""
+def _dojo_dir():
+    """PseudoDojo v0.4 (tools/fetch_pseudodojo.sh) under config data.pseudopotentials."""
+    try:
+        from simws.config import load as cfg
+        root = Path(cfg()["data"]["pseudopotentials"]).expanduser()
+    except Exception:  # noqa: BLE001
+        root = Path("sim_data/pseudopotentials")
+    return (root if root.is_absolute() else Path.cwd() / root) / "pseudodojo_v0.4"
+
+
+def dft_engine(engine, work, ecut_Ry=40.0, ecut_eV=500.0, kgrid=(8, 8, 8), qe_pseudo="rrkj") -> dict:
+    """One engine's side of the DFT pair: EOS on the shared a grid and band energies at a = 5.431 A on the shared k
+    list. Cached per setting in <work>/<tag>.json (the pre-registered setting keeps the names qe.json / gpaw.json).
+    qe_pseudo: "rrkj" (bundled Si.pbe-rrkj.UPF) or "dojo" (PseudoDojo v0.4 standard Si.pbe.upf)."""
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
-    cache = work / f"{engine}.json"
+    kgrid = tuple(int(k) for k in kgrid)
+    default = (ecut_Ry, ecut_eV, kgrid, qe_pseudo) == (40.0, 500.0, (8, 8, 8), "rrkj")
+    tag = engine if default else (f"qe_{qe_pseudo}_{ecut_Ry:g}Ry_k{kgrid[0]}" if engine == "qe"
+                                  else f"gpaw_{ecut_eV:g}eV_k{kgrid[0]}")
+    cache = work / f"{tag}.json"
     if cache.is_file():
         return json.loads(cache.read_text())
     a_grid = 5.47 * np.linspace(0.98, 1.02, 7)
+    wd = work / tag
     if engine == "qe":
         from simws.dft import qe
-        pseudos = {"Si": "Si.pbe-rrkj.UPF"}
+        if qe_pseudo == "rrkj":
+            pseudos, pdir = {"Si": "Si.pbe-rrkj.UPF"}, str(PSEUDO)
+        elif qe_pseudo == "dojo":
+            pseudos, pdir = {"Si": "Si.pbe.upf"}, str(_dojo_dir())
+            if not (Path(pdir) / "Si.pbe.upf").is_file():
+                raise FileNotFoundError(f"PseudoDojo Si.pbe.upf not in {pdir}: run bash tools/fetch_pseudodojo.sh")
+        else:
+            raise ValueError(qe_pseudo)
         eos = qe.equation_of_state("Si", 5.47, pseudos, ecutwfc=ecut_Ry, kgrid=kgrid, npts=7, span=0.02,
-                                   workdir=work / "qe_eos", pseudo_dir=str(PSEUDO))
+                                   workdir=wd / "qe_eos", pseudo_dir=pdir)
         st = qe.Structure.diamond("Si", 5.431)
-        qe.run(qe.PW(st, pseudos, ecutwfc=ecut_Ry, kgrid=kgrid, prefix="si", pseudo_dir=str(PSEUDO)), work / "qe_bands")
+        qe.run(qe.PW(st, pseudos, ecutwfc=ecut_Ry, kgrid=kgrid, prefix="si", pseudo_dir=pdir), wd / "qe_bands")
         rb = qe.run(qe.PW(st, pseudos, ecutwfc=ecut_Ry, calculation="bands", klist=_klist(), nbnd=8, prefix="si",
-                          pseudo_dir=str(PSEUDO)), work / "qe_bands")
+                          pseudo_dir=pdir), wd / "qe_bands")
         eig, version = np.asarray(rb.eigenvalues_eV), rb.pw_version
     elif engine == "gpaw":
         from simws.dft import gpaw_engine as G
-        eos = G.equation_of_state("Si", a_grid, ecut_eV=ecut_eV, kgrid=kgrid, workdir=work / "gpaw_eos")
-        gb = G.band_energies("Si", 5.431, _klist(), ecut_eV=ecut_eV, kgrid=kgrid, workdir=work / "gpaw_bands")
+        eos = G.equation_of_state("Si", a_grid, ecut_eV=ecut_eV, kgrid=kgrid, workdir=wd / "gpaw_eos")
+        gb = G.band_energies("Si", 5.431, _klist(), ecut_eV=ecut_eV, kgrid=kgrid, workdir=wd / "gpaw_bands")
         eig, version = np.asarray(gb["eigenvalues_eV"]), eos.get("engine")
     else:
         raise ValueError(engine)
     out = {"engine": engine, "version": version, "a0_A": float(eos["a0_A"]), "B0_GPa": float(eos["B0_GPa"]),
            **_edges(eig, 4), "eigenvalues_eV": eig.tolist(),
-           "settings": {"ecut_Ry": ecut_Ry, "ecut_eV": ecut_eV, "kgrid": list(kgrid), "functional": "PBE"}}
+           "settings": {"ecut_Ry": ecut_Ry, "ecut_eV": ecut_eV, "kgrid": list(kgrid), "functional": "PBE",
+                        "qe_pseudo": qe_pseudo if engine == "qe" else "PAW (gpaw-data)"}}
     cache.write_text(json.dumps(out, indent=1))
     return out
 
 
-def dft_pair(work, **kw) -> dict:
-    """QE (pw.x, qe env) vs GPAW (in-process). Either side may be computed earlier and cached."""
-    q, g = dft_engine("qe", work, **kw), dft_engine("gpaw", work, **kw)
-    out = {"engines": {"qe": q["version"], "gpaw": g["version"]}, "rows": {}, "pass": True,
+DFT_QUANTITIES = ("a0_A", "B0_GPa", "indirect_gap_eV", "direct_gap_G_eV", "gap_X_eV", "gap_L_eV")
+
+
+def _compare(q, g) -> dict:
+    out = {"engines": {"qe": q["version"], "gpaw": g["version"]}, "settings": {"qe": q["settings"],
+           "gpaw": g["settings"]}, "rows": {}, "pass": True,
            "cbm_position_tpiba": {"qe": q["cbm_k_tpiba"], "gpaw": g["cbm_k_tpiba"]}}
-    for k in ("a0_A", "B0_GPa", "indirect_gap_eV", "direct_gap_G_eV", "gap_X_eV", "gap_L_eV"):
+    for k in DFT_QUANTITIES:
         a, b = q[k], g[k]
         if k == "a0_A":
             d, tol = abs(a / b - 1), TOLERANCES["dft.a0"]
@@ -115,6 +141,75 @@ def dft_pair(work, **kw) -> dict:
                           "model_form_rel": _mf(a, b)}
         out["pass"] &= ok
     return out
+
+
+def dft_pair(work, **kw) -> dict:
+    """QE (pw.x, qe env) vs GPAW (in-process) at one setting (the pre-registered one by default)."""
+    gkw = {k: v for k, v in kw.items() if k != "qe_pseudo"}
+    return _compare(dft_engine("qe", work, **kw), dft_engine("gpaw", work, **gkw))
+
+
+# Convergence and pseudopotential rule, fixed on 2026-11-04 after the pre-registered setting (QE 40 Ry Si.pbe-rrkj,
+# GPAW 500 eV, 8x8x8) failed on the L-point gap (61 meV vs 50 meV), before any of the runs below. The tolerances
+# do not change.
+#   1. Ladders: QE 40/60/80 Ry, GPAW 500/700/900 eV at 8x8x8; then the top cutoffs at 12x12x12.
+#   2. Converged = the last step (cutoff, then k) changes every quantity by < 10 % of its tolerance (band 5 meV,
+#      a0 0.05 %, B0 0.5 %). The pair is judged at the top setting; a non-converged ladder is reported as such.
+#   3. Pass at the top setting -> the pre-registered failure was numerical; the pair uses the top setting.
+#   4. Fail at the top setting -> QE with PseudoDojo v0.4 (standard, ONCVPSP) at the same setting. Pass -> PseudoDojo
+#      becomes the QE side of the pair (the rrkj disagreement is recorded as a pseudopotential finding). Fail -> the
+#      gate fails.
+QE_LADDER, GPAW_LADDER, K_TOP = (40.0, 60.0, 80.0), (500.0, 700.0, 900.0), (12, 12, 12)
+CONV_FRACTION = 0.10
+
+
+def _delta(a, b, k):
+    return abs(a[k] / b[k] - 1) if k in ("a0_A", "B0_GPa") else abs(a[k] - b[k])
+
+
+def _ladder_steps(runs):
+    """Changes between consecutive settings, as a fraction of each tolerance."""
+    tolk = {"a0_A": TOLERANCES["dft.a0"], "B0_GPa": TOLERANCES["dft.B0"]}
+    steps = []
+    for (la, a), (lb, b) in zip(runs, runs[1:]):
+        fr = {k: _delta(b, a, k) / tolk.get(k, TOLERANCES["dft.band_eV"]) for k in DFT_QUANTITIES}
+        steps.append({"from": la, "to": lb, "fraction_of_tolerance": fr, "worst": max(fr.values())})
+    return steps
+
+
+def dft_pair_resolved(work, fetch_dojo=None) -> dict:
+    work = Path(work)
+    pre = dft_pair(work)
+    res = {"preregistered": pre, "rule_fixed_on": "2026-11-04 (after the pre-registered failure, before these runs)"}
+    if pre["pass"]:
+        res.update(final=pre, decision="pre-registered setting passes")
+        return res
+    q_runs = [(f"{e:g} Ry k8", dft_engine("qe", work, ecut_Ry=e)) for e in QE_LADDER]
+    g_runs = [(f"{e:g} eV k8", dft_engine("gpaw", work, ecut_eV=e)) for e in GPAW_LADDER]
+    q_top = dft_engine("qe", work, ecut_Ry=QE_LADDER[-1], kgrid=K_TOP)
+    g_top = dft_engine("gpaw", work, ecut_eV=GPAW_LADDER[-1], kgrid=K_TOP)
+    q_runs.append((f"{QE_LADDER[-1]:g} Ry k12", q_top)); g_runs.append((f"{GPAW_LADDER[-1]:g} eV k12", g_top))
+    conv = {"qe_rrkj": _ladder_steps(q_runs), "gpaw": _ladder_steps(g_runs)}
+    converged = all(s["worst"] < CONV_FRACTION for steps in conv.values() for s in steps[-2:])
+    top = _compare(q_top, g_top)
+    res.update(convergence=conv, converged=bool(converged), top_setting=top,
+               ladder={"qe_rrkj": {l: {k: r[k] for k in DFT_QUANTITIES} for l, r in q_runs},
+                       "gpaw": {l: {k: r[k] for k in DFT_QUANTITIES} for l, r in g_runs}})
+    if top["pass"]:
+        res.update(final=top, decision="passes at the converged setting: the pre-registered failure was numerical")
+        return res
+    if fetch_dojo and not (_dojo_dir() / "Si.pbe.upf").is_file():
+        fetch_dojo(_dojo_dir())
+    q_dojo = dft_engine("qe", work, ecut_Ry=QE_LADDER[-1], kgrid=K_TOP, qe_pseudo="dojo")
+    dojo = _compare(q_dojo, g_top)
+    res["pseudodojo"] = dojo
+    res["rrkj_vs_dojo_L_gap_eV"] = q_top["gap_L_eV"] - q_dojo["gap_L_eV"]
+    if dojo["pass"]:
+        res.update(final=dojo, decision="fails with Si.pbe-rrkj at the converged setting, passes with PseudoDojo: "
+                                        "PseudoDojo is the QE side of the pair; the rrkj L-point error is recorded")
+    else:
+        res.update(final=dojo, decision="fails at the converged setting with both QE pseudopotentials: gate fails")
+    return res
 
 
 # ================================================================================================= FEM: skfem vs FEniCSx

@@ -363,9 +363,9 @@ rule engine_pairs_dft:
     input: "simws/validation/engine_pairs.py", "simws/dft/gpaw_engine.py", "simws/dft/qe.py",
            "workflow/scripts/engine_pairs.py"
     output: f"{RES}/engine_pairs/dft.json"
-    threads: 1
+    threads: 2
     resources: mem_mb=3000
-    params: py=py(DFT_ENV), env=threads_env(1), out=f"{RES}/engine_pairs"
+    params: py=py(DFT_ENV), env=threads_env(2), out=f"{RES}/engine_pairs"
     log: "logs/engine_pairs_dft.log"
     shell: "{params.env} {params.py} workflow/scripts/engine_pairs.py --outdir {params.out} --parts dft > {log} 2>&1"
 

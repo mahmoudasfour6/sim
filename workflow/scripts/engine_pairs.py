@@ -21,8 +21,26 @@ parts = a.parts.split(",")
 from simws.validation import engine_pairs as E
 
 if parts == ["dft"]:
-    r = E.dft_pair(out / "dft_work")
+    import subprocess
+
+    def fetch(target):
+        subprocess.run(["bash", "tools/fetch_pseudodojo.sh", str(target)], check=False)
+    rr = E.dft_pair_resolved(out / "dft_work", fetch_dojo=fetch)
+    r = dict(rr["final"], resolution=rr)
     (out / "dft.json").write_text(json.dumps(r, indent=1, default=float))
+    print("pre-registered (QE 40 Ry rrkj, GPAW 500 eV, k8):", "PASS" if rr["preregistered"]["pass"] else "FAIL",
+          f"L gap diff {1e3 * rr['preregistered']['rows']['gap_L_eV']['difference']:.1f} meV")
+    for name, steps in rr.get("convergence", {}).items():
+        for st in steps:
+            print(f"convergence {name:8s} {st['from']:>11s} -> {st['to']:<11s} worst change "
+                  f"{100 * st['worst']:.1f} % of tolerance")
+    if "converged" in rr:
+        print("converged:", rr["converged"], "| top setting:", "PASS" if rr["top_setting"]["pass"] else "FAIL",
+              f"L gap diff {1e3 * rr['top_setting']['rows']['gap_L_eV']['difference']:.1f} meV")
+    if "pseudodojo" in rr:
+        print(f"QE PseudoDojo vs GPAW: {'PASS' if rr['pseudodojo']['pass'] else 'FAIL'}; QE L gap rrkj - dojo "
+              f"{1e3 * rr['rrkj_vs_dojo_L_gap_eV']:+.1f} meV")
+    print("decision:", rr["decision"])
     for k, v in r["rows"].items():
         print(f"dft: {k:16s} QE {v['qe']:.5f}  GPAW {v['gpaw']:.5f}  diff {v['difference']:.2e} (tol {v['tolerance']})"
               f" {'ok' if v['pass'] else 'FAIL'}")
