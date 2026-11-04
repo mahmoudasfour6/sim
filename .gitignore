@@ -32,3 +32,5 @@ release/
 store/
 sim_data/pseudopotentials/pseudodojo_v0.4/
 runs/
+logs_charon.txt
+03_tcad_devices/particle_strike_ref/*.inp.xml
