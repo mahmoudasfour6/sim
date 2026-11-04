@@ -510,7 +510,7 @@ def main(argv=None):
     if a.action == "write":
         print(" ".join(write_decks(a.dir)))
         return 0
-    gate = {}
+    gate, points, warns = {}, {}, []
     for label in a.cases:
         sk = label in SK_CASES
         cfg = {"T": SK_CASES[label], "srh": True} if sk else CASES[label]
@@ -529,8 +529,24 @@ def main(argv=None):
         kind = "diagnostic" if label in DIAGNOSTIC or not r["currents"] else "comparison"
         Path(a.dir, f"{kind}_{label}.json").write_text(json.dumps(r, indent=1))
         n_ok = sum(1 for x in r["currents"])
+        points[label] = n_ok
+        diag = label in DIAGNOSTIC
+        verdict = (f"diagnostic, not gated ({'within' if r['pass'] else 'outside'} 2 %)" if diag
+                   else ("PASS" if r["pass"] else "FAIL"))
         print(f"\n{label}{' Schottky diode' if sk else ''} (T = {cfg['T']:g} K, SRH {'on' if cfg['srh'] else 'off'}): {n_ok} Charon bias points; "
-              f"worst gated difference {100 * r['worst_rel_diff']:.2f} % -> {'PASS' if r['pass'] else 'FAIL'}")
+              f"worst gated difference {100 * r['worst_rel_diff']:.2f} % -> {verdict}")
+        # noise-floor margin: the gated points must sit far above Charon's own current noise (its "current" at the
+        # lowest biases, where both codes' true currents are far smaller) and above the gate floor
+        gated = [x for x in r["currents"] if x["gated"]]
+        if gated and not diag:
+            noise = max([abs(x["J_charon"]) for x in r["currents"] if x["V"] <= 0.1] or [0.0])
+            jmin = min(min(x["J_charon"], x["J_devsim"]) for x in gated)
+            margin = jmin / noise if noise > 0 else float("inf")
+            r["noise_floor"] = {"charon_low_bias_A_cm2": noise, "smallest_gated_A_cm2": jmin, "margin": margin}
+            if margin < 100 or jmin < 10 * J_FLOOR:
+                warns.append(f"WARN {label}: smallest gated current {jmin:.3g} A/cm^2 is only {margin:.3g}x Charon's "
+                             f"low-bias noise ({noise:.3g}) / {jmin / J_FLOOR:.3g}x the gate floor")
+            Path(a.dir, f"{kind}_{label}.json").write_text(json.dumps(r, indent=1))
         for row in r["currents"]:
             print(f"  V={row['V']:.2f}  Charon {row['J_charon']:.4e}  DEVSIM {row['J_devsim']:.4e}  "
                   f"{100 * row['rel_diff']:+.2f}%{'' if row['gated'] else '  (below floor)'}")
@@ -541,11 +557,19 @@ def main(argv=None):
         gate[label] = r["pass"]
     if a.action == "devsim":
         return 0
-    cold = gate.get("T77") or (gate.get("T77c10") and "T77c10 (10 nm; fine-mesh 77 K run did not converge in Charon)")
+    # the 10 nm cold case stands in ONLY when Charon could not run the fine-mesh 77 K case at all; a fine-mesh case
+    # that ran and missed 2 % fails the gate
+    if points.get("T77", 0) > 0:
+        cold = gate.get("T77")
+    else:
+        cold = gate.get("T77c10") and "T77c10 (10 nm; fine-mesh 77 K run did not converge in Charon)"
     gate["gate_pass"] = bool(gate.get("T300") and gate.get("T150") and cold)
     gate["schottky_pass"] = bool(gate.get("SK300") and gate.get("SK200"))   # 0.9b contact cross-check
-    gate["cold_case"] = "T77" if gate.get("T77") else cold or None
+    gate["cold_case"] = "T77" if points.get("T77", 0) > 0 else cold or None
+    gate["warnings"] = warns
     Path(a.dir, "gate.json").write_text(json.dumps(gate, indent=1))
+    for w in warns:
+        print(w)
     print(f"\nGATE: {'PASS' if gate['gate_pass'] else 'FAIL'} (T300 {gate.get('T300')}, T150 {gate.get('T150')}, "
           f"cold case {gate['cold_case']}); Schottky (0.9b): {'PASS' if gate['schottky_pass'] else 'FAIL'}")
     return 0 if gate["gate_pass"] else 1
