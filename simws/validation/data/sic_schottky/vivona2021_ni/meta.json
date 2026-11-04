@@ -1,0 +1,16 @@
+{
+ "citation": "M. Vivona, G. Greco, M. Spera, P. Fiorenza, F. Giannazzo, A. La Magna, F. Roccaforte, Ni Schottky barrier on heavily doped phosphorous implanted 4H-SiC, J. Phys. D: Appl. Phys. (2021), doi:10.1088/1361-6463/ac13f3",
+ "doi_or_arxiv": "10.1088/1361-6463/ac13f3; arXiv:2102.08927",
+ "protocol": 2,
+ "eligibility": "Figure 3 caption: 'Experimental J-VF curves for Ni/4H-SiC Schottky diode under forward bias at different measurement temperatures in the range 25-115 C'; text: 'at various temperatures in the range 25-115 C (step of 15 C)' -> 7 temperatures, eligible (checked from captions and text before any curve was extracted)",
+ "figure": "Fig. 3: forward J-V at 25-115 C, step 15 C, Ni (100 nm, not annealed) on P-implanted 4H-SiC",
+ "metal": "Ni, as deposited (no anneal)",
+ "N_D_cm3": 1.97e+19,
+ "N_D_source": "'The barrier PhiB_TFE and the doping concentration ND were determined as parameters of the TFE fit to the experimental J-VF curve, obtaining PhiB_TFE = 1.77 eV and ND = 1.97x10^19 cm-3.' (Fig. 2, 25 C, a fit-set temperature); 'Such donor concentration is in agreement with the value measured by scanning capacitance microscopy (SCM) of the active dopant profile'. The SIMS peak 1x10^20 cm-3 is the chemical P concentration over 200 nm, not the active donor density, so the active value is used (depletion width ~10 nm, inside the implanted layer). Choice recorded before the Fig. 3 curves were opened.",
+ "area_cm2": 1.0,
+ "units_note": "I_A holds current DENSITY in A/cm^2 (the figure plots J); contacts 250 um diameter",
+ "approved": true,
+ "approved_by": "user (M. Asfour), 2026-11-05: protocol 2 (option 1)",
+ "digitized_by": "simws (Claude), 2026-11-05, after the protocol-2 amendment was written: colour separation of Fig. 3 (see digitize/README.md)",
+ "digitization_uncertainty": "about +-1 px: +-0.02 decade (+-5 %) in J, +-4 mV in V; below ~1e-7 A/cm^2 the curves are at the noise floor"
+}

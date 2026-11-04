@@ -32,3 +32,28 @@ a failure.
 6. Each held-out temperature needs >= 10 points in its window; otherwise the gate is inconclusive (not a pass).
 7. Digitization as for protocol 1 (vector extraction if the figure is vector, else colour separation), with the
    overlay check and the scripts stored next to the data.
+
+## Amendment 1 (2026-11-05, before any curve of the second dataset was extracted)
+- Eligibility: met. Fig. 3 caption and text: forward J-V at 25-115 C in 15 C steps (7 temperatures). The rule gives
+  fit = 25 and 70 C, held out = 40, 55, 85, 100, 115 C.
+- Doping (rule 3): the paper states two near-surface values: the SIMS peak 1e20 cm^-3 (chemical phosphorus) and the
+  active donor density 1.97e19 cm^-3 (TFE fit of the 25 C curve, a fit-set temperature, agreeing with SCM of the
+  active profile). The active density is the one that sets the barrier field, so N_D = 1.97e19 cm^-3. The paper's
+  own per-temperature N_D (Fig. 3 inset) is not used.
+
+## Result (2026-11-05)
+FAIL, conclusive (52-65 points per held-out temperature). Fit at 25 and 70 C: phi_B0 2.12 eV, sigma_s 0,
+R_s 0.73 ohm cm^2, rms ln residual 0.77 (the model does not fit even the fit temperatures). Held-out worst ratios:
+40 C 1.85, 55 C 1.21, 85 C 3.9, 100 C 6.6, 115 C 11.2.
+
+Diagnostics after the result (post hoc, not part of the gate):
+- The data's ideality falls from 1.80 (25 C) to 1.37 (115 C), as thermionic-field emission predicts
+  (n = (E00/kT) coth(E00/kT) = 1.77 at 25 C with kT/qE00 = 0.61): the tunnelling regime is the right one.
+- Switching off the image-force factor: phi_B0 1.74 eV (the paper's TFE fit: 1.77 eV), rms 0.44, held-out worst
+  5.2. At 2e19 cm^-3 the interface field is ~3.6 MV/cm and the image-force lowering ~0.23 eV; applying it as a
+  factor exp(d_phi/kT) on top of a WKB integral over an unrounded triangular barrier double-counts at high field.
+- The paper's own TFE fits need a barrier that falls with T (1.77 -> 1.66 eV, about -1.2 meV/K). The model's
+  Gaussian inhomogeneity can only make the effective barrier rise with T.
+Model work this points to: image-force rounding inside the WKB integral (not as a separate factor); Fermi-Dirac
+statistics for N_D > N_c; a physical origin for the falling barrier (band-gap shift, implantation defects).
+A further test needs a protocol 3 and a third dataset nobody has opened.
