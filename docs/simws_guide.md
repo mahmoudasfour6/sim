@@ -291,12 +291,31 @@ asked for, and the 0.8 unit, connection and slow tests still pass against their 
   | Asymmetry of the conductance matrix of a three-contact bar (Onsager reciprocity) | passes at 300 K (77 K runs in `cryo_gate`) | 1e-6 |
 
   The HBT adapter also refuses a result whose zero-bias terminal current is above the noise floor.
-- **Charon cross-check**: `bash tools/run_charon_xcheck.sh`, which runs on the laptop.
-  - What it runs: a cold pn diode (1e17/1e17 cm⁻³, 77 K and 300 K) on Charon's own `pndiode.exo` mesh, with
-    CVFEM-SG. Our band parameters are written into the Charon deck, and both codes use Charon's
-    incomplete-ionization form, fixed mobilities and SRH.
-  - Gate: terminal current density (above 1e-6 A/cm²) and neutral-region majority densities within 2 %.
-  - Results land in `~/sim_workspace/runs/charon_xcheck/comparison_T*.json`.
+- **Charon cross-check** (`bash tools/run_charon_xcheck.sh`, laptop; gate passed 4 Nov 2026).
+  - **Setup.** A 1e17/1e17 cm⁻³ pn diode with Charon's incomplete-ionization form, Fermi–Dirac statistics, fixed
+    mobilities and SRH. Our band parameters are written into the Charon decks. Both codes use the same 1.25 nm mesh
+    along x, written by `simws.validation.charon_mesh` in the same layout as Charon's own pndiode.exo.
+  - **Results:**
+
+    | Case | Worst gated current difference (gate 2 %) |
+    |---|---|
+    | 300 K | 0.07 % |
+    | 150 K | 0.11 % |
+    | 77 K | 0.04 % |
+    | 300 K, SRH off (diagnostic) | 0.05 % |
+
+    The frozen-out majority densities agree to 3e-4 (93 % ionized at 300 K, 57–67 % at 150 K, 10–13 % at 77 K). The
+    built-in voltages agree to within 30 µV.
+  - **What it took** (Charon 2.2):
+    - `Import State File <mesh> at index 1` on a bare mesh aborts silently with MPI_ABORT 14.
+    - The nonlinear-Poisson stage aborts with these material blocks.
+    - A Band Gap block needs `temperature dependence is on`.
+    - Drift-diffusion needs a backtracking line search.
+    - Cold cases are reached by temperature continuation at 0 V: 300 → 200 → 150 → 110 → 95 → 85 → 77 K.
+    - `python tools/charon_bisect.py` isolates a silently aborting deck.
+  - **Mesh finding.** On Charon's 10 nm mesh the SRH peak (width about kT/qE) is not resolved, so the
+    recombination-dominated currents differ by up to ±14 % about the converged value, with opposite signs in the two
+    codes: node lumping undershoots and quadrature overshoots. The 10 nm control case reproduces that exactly.
 - **Paper fidelity for devices.** `devsim.hbt_gummel` at `fidelity="paper"` runs three meshes (spacings ×1,
   1/√2 and ½). Each quantity gets a numerical uncertainty (`components.numerical`) and `verification["mesh"]` per
   bias point. The gatekeeper requires both.
