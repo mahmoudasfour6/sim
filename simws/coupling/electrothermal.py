@@ -52,7 +52,10 @@ def _ni_expr(mat, T_sym="TempK"):
     return (f"{ni}*({T_sym}/300)^1.5*exp({Eg('300')}/(2*{K_B_EV}*300) - {Eg(T_sym)}/(2*{K_B_EV}*{T_sym}))")
 
 
-def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
+def build_electrical(case: ResistorCase, mat):
+    """DEVSIM side of the resistor: returns a namespace with px, py (cm), tris, n_nodes, set_T(T), solve(),
+    set_bias(V), nodal_power() (W/cm per node, sums to I*V), contact_current() and edge-node arrays."""
+    from types import SimpleNamespace
     from devsim import (add_2d_contact, add_2d_mesh_line, add_2d_region, create_2d_mesh, create_device,
                         edge_model, finalize_mesh, get_contact_current, get_edge_model_values,
                         get_element_node_list, get_node_model_values, node_model, set_node_values,
@@ -61,12 +64,10 @@ def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
     from devsim.python_packages.model_create import CreateNodeModel, CreateSolution
     import skfem
 
-    from simws.materials import load
     from simws.tcad import devsim_materials
 
     from devsim import reset_devsim
     reset_devsim()                      # each run starts from a clean DEVSIM state
-    mat = material or load("silicon")
     L, H = case.length_um * UM, case.height_um * UM
     dev, reg = "res", "si"
     create_2d_mesh(mesh="r")
@@ -141,7 +142,6 @@ def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
     ends = [np.array(get_edge_model_values(device=dev, region=reg, name=n)) / UM for n in ("x@n0", "y@n0", "x@n1", "y@n1")]
     enodes = np.array([[key[(round(a, 9), round(b, 9))], key[(round(c, 9), round(d, 9))]]
                        for a, b, c, d in zip(*ends)], dtype=int)
-    k300, ka = mat.get("thermal_k", "W/cm/K"), mat.get("thermal_k_T_exponent", "dimensionless")
 
     def nodal_power():
         jd = np.array(get_edge_model_values(device=dev, region=reg, name="JouleDensity"))
@@ -153,6 +153,29 @@ def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
         np.add.at(p, enodes[:, 1], 0.5 * p_edge)
         return p
 
+    def contact_current():
+        return (get_contact_current(device=dev, contact="anode", equation="ElectronContinuityEquation")
+                + get_contact_current(device=dev, contact="anode", equation="HoleContinuityEquation"))
+
+    def set_T(T):
+        set_node_values(device=dev, region=reg, name="TempK", values=list(T))
+
+    def set_bias(V):
+        set_parameter(device=dev, name=sp.GetContactBiasName("anode"), value=float(V))
+
+    return SimpleNamespace(px=px, py=py, tris=tris, n_nodes=n_nodes, mesh=mesh, basis=basis, sink=sink,
+                           set_T=set_T, set_bias=set_bias, solve=lambda: solve(type="dc", **opts),
+                           nodal_power=nodal_power, contact_current=contact_current, L=L, H=H)
+
+
+def thermal_solver(mesh, sink_nodes, case: ResistorCase, mat):
+    """scikit-fem P1 steady heat solver on `mesh` (cm): thermal(p_node, T_guess) -> (T, heat_to_sink), where p_node is
+    the nodal heat load (W/cm per node, an integral quantity) and T = T_sink on sink_nodes."""
+    import skfem
+    basis = skfem.Basis(mesh, skfem.ElementTriP1())
+    n = mesh.p.shape[1]
+    k300, ka = mat.get("thermal_k", "W/cm/K"), mat.get("thermal_k_T_exponent", "dimensionless")
+
     @skfem.BilinearForm
     def conduction(u, v, w):
         return w["k"] * (u.grad[0] * v.grad[0] + u.grad[1] * v.grad[1])
@@ -162,27 +185,32 @@ def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
         for _ in range(50):                                  # inner Picard for k(T)
             kq = k300 * (300.0 / basis.interpolate(T).value) ** (ka if case.couple_k else 0.0)
             K = skfem.asm(conduction, basis, k=kq)
-            T_new = skfem.solve(*skfem.condense(K, p_node, x=np.full(n_nodes, case.T_sink), D=sink))
+            T_new = skfem.solve(*skfem.condense(K, p_node, x=np.full(n, case.T_sink), D=sink_nodes))
             if np.max(np.abs(T_new - T)) < 1e-9:
                 T = T_new
                 break
             T = T_new
-        heat_to_sink = float(-(K @ T - p_node)[sink].sum())   # reaction at the Dirichlet nodes
+        heat_to_sink = float(-(K @ T - p_node)[sink_nodes].sum())   # reaction at the Dirichlet nodes
         return T, heat_to_sink
+    return thermal
 
-    def contact_current():
-        return (get_contact_current(device=dev, contact="anode", equation="ElectronContinuityEquation")
-                + get_contact_current(device=dev, contact="anode", equation="HoleContinuityEquation"))
 
-    def set_T(T):
-        set_node_values(device=dev, region=reg, name="TempK", values=list(T))
+def run(case: ResistorCase = ResistorCase(), material=None, verbose=False):
+    from simws.materials import load
+    mat = material or load("silicon")
+    e = build_electrical(case, mat)
+    n_nodes, px, py, tris = e.n_nodes, e.px, e.py, e.tris
+    set_T, nodal_power, contact_current = e.set_T, e.nodal_power, e.contact_current
+    thermal = thermal_solver(e.mesh, e.sink, case, mat)
+    from devsim import solve
+    opts = dict(absolute_error=1e10, relative_error=1e-8, maximum_iterations=60)
 
     results = []
     T = np.full(n_nodes, case.T_sink)
     v_prev = 0.0
     for V in case.biases:
         for vv in np.linspace(v_prev, V, max(2, int(abs(V - v_prev) / 0.25) + 1))[1:]:
-            set_parameter(device=dev, name=sp.GetContactBiasName("anode"), value=float(vv))
+            e.set_bias(vv)
             solve(type="dc", **opts)
         v_prev = V
         # isothermal reference at this bias

@@ -174,6 +174,9 @@ class Hub:
     def _commit(self, job: JobEnvelope, res: ResultEnvelope, staging: Path, supersedes=None) -> ResultEnvelope:
         m = A.manifest(job.key.adapter)
         res.provenance.setdefault("adapter_code_version", m.version)
+        if job.fidelity == "paper" and res.status == "ok":
+            from simws.hub import model_form
+            model_form.attach(res, self.store.root)          # cross-engine spread (0.9c) into the budgets
         res, rep = gatekeeper.apply(job, res, m, staging)
         with self.store.lock():
             res = self.store.finalize(staging, res)

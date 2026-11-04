@@ -18,6 +18,9 @@ if _os.environ.get("SIMWS_DEVSIM_SOLVER", "").lower() == "mkl" and "DEVSIM_MATH_
     if _mkl:
         _os.environ["DEVSIM_MATH_LIBS"] = _mkl[-1]
 
+# load numpy (and the env's OpenBLAS) before DEVSIM opens its math library: after the 0.9b/0.9c conda installs,
+# importing devsim first segfaulted in DEVSIM's own load of libopenblas on the laptop (seen 4 Nov 2026)
+import numpy as _np  # noqa: E402,F401
 import devsim as _devsim  # noqa: E402
 
 if not getattr(_devsim.reset_devsim, "_simws_safe", False):

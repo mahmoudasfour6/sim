@@ -364,6 +364,133 @@ asked for, and the 0.8 unit, connection and slow tests still pass against their 
   - Below 250 K, results keep `extrapolated` and `cryo_unvalidated`: the core is checked against closed forms
     and Charon, not against measured devices.
 
+## simws 0.9b: contacts, small-signal and noise, one geometry, conservative coupling
+
+`notebooks/contacts_coupling_tour.ipynb` walks through it. The 0.9b gate is `workflow/scripts/gate_0p9b.py` (rule
+`gate_0p9b`).
+
+- **Schottky contacts** (`simws.tcad.contacts.schottky_contact`; Crowell–Sze flux boundary condition, the current
+  is v(n − n0B) with v = A*T²/(qNc)). Optional terms:
+  - image-force lowering exp(Δφ/kT), with Δφ = √(qE_s/4πε);
+  - WKB thermionic-field tunnelling, a factor 1 + Γ from 32-point Gauss–Legendre quadrature (`m_tunnel` 0.26 for Si).
+
+  The interface field E_s is lagged and relaxed by an outer iteration (`relax_schottky`; pass it as a
+  `ramp_bias(..., callback=..., retry_callback=True)`).
+- **Contact checks** (`simws.validation.contact_checks`):
+
+  | Check | Result | Gate |
+  |---|---|---|
+  | Thermionic emission vs J = A*T² e^(−φB/kT)(e^(V/kT) − 1) at μ = 1e8 (deviation scales as 1/μ: ratio 100.0) | 1.2e-6 | 1e-4 |
+  | Zero-bias current with both options on (detailed balance), relative to 0.1 V | 3e-17 | 1e-12 |
+  | Image-force lowering vs closed form | 9.9e-5 | 2 % |
+  | Device quadrature of Γ vs adaptive quadrature | 3.4e-5 | 1e-4 |
+  | Device current with tunnelling vs TE·(1+Γ) at the device's field | 1.1e-6 | 1e-3 |
+  | Padovani–Stratton (a saddle-point form of the same integral), TFE regime | ratio 1.04–1.52 | reported (model form) |
+  | Charon, Schottky diode at 300 and 200 K (laptop) | < 0.005 % | 2 % |
+- **Small-signal AC** (`simws.tcad.small_signal`; adapter `devsim.hbt_ac`):
+  - Y-parameters come from DEVSIM's AC solve.
+  - f_T comes from a single-pole fit of h21, and f_max from Mason's U.
+  - Charge control gives τ = dQ_B/dI_C.
+
+  | HBT point | f_T from AC h21 | f_T = 1/(2πτ) | Difference | f_max |
+  |---|---|---|---|---|
+  | SiGe, 0.75 V | 4.98 GHz | 4.98 GHz | +0.04 % | 16.9 GHz |
+  | SiGe, 0.85 V | 48.1 GHz | 48.4 GHz | −0.6 % | 50.0 GHz |
+  | Si, 0.85 V | 19.6 GHz | 19.6 GHz | +0.3 % | 32.6 GHz |
+
+  The gate is 5 %. The depletion capacitance of a reverse-biased diode agrees with its closed form to 2e-6
+  (gate 1e-3).
+- **Noise** (impedance-field method):
+  - DEVSIM's noise solve gives the Green's functions.
+  - Diffusion noise is evaluated in edge form; generation–recombination noise is 2q²(r + g)|G_n − G_p|².
+  - At contact nodes DEVSIM leaves G = 0, so G is set to the boundary value nearest to the mean of the neighbours.
+
+  Checks:
+  - Shot noise of an ideal diode: 2qI to 8e-4 (gate 2e-3).
+  - Nyquist noise of a 2D resistor: 4kTG to 2e-11 (gate 1e-6).
+  - HBT collector noise is 2.7 × 2qI_C at 0.75 V. The excess is the thermal noise of the intrinsic base resistance
+    reaching the collector through g_m, not a defect.
+- **One geometry** (`simws.geometry.Geometry`): rectangles (a region may be several), contacts as boundary segments,
+  refinement points.
+  - `.mesh(path, structured=True)` writes a transfinite right-triangle mesh, with spacing per rectangle via
+    `rect(..., size=(hx, hy))`. DEVSIM's control volumes then tile every region exactly: 5e-14, against 1 % for an
+    unstructured mesh with size gradients.
+  - `.to_devsim()` and `.to_skfem()` read the same .msh, and `.geant4_slab(x)` gives the material stack for the
+    track tool.
+  - A pn diode on the gmsh mesh matches DEVSIM's own mesh to 6e-16.
+- **Conservative transfer** (`simws.transfer`): cell integrals move by polygon overlap (shapely). Each source cell's
+  fractions sum to one, so the integral is conserved to round-off. Area outside the target is reported, never
+  dropped. Every transfer returns a `TransferRecord` (integrals, conservation error, lost area, L2 round-trip error).
+
+  | Transfer | Conservation | L2 round-trip error (recorded) |
+  |---|---|---|
+  | Geant4-style dose grid → DEVSIM node generation | 1e-16 | — |
+  | DEVSIM node field → unstructured scikit-fem mesh | 0 | 7.8 % |
+  | P1 field between two unrelated meshes | 0 | 1.0 % |
+
+  The gate is 1e-8 for conservation; the round-trip error is the first-order cost of P0 remapping and is recorded,
+  not gated.
+- **preCICE** (`simws.coupling.precice_bridge`; preCICE 3, pyprecice):
+  - DEVSIM (electrical) and scikit-fem (thermal, on its own gmsh mesh) run as separate processes.
+  - Heat moves by conservative linear-cell interpolation, and temperature by consistent interpolation.
+  - The coupling is serial-implicit with Aitken acceleration, one time window per bias.
+
+  | Thermal mesh | T_max at 5 V | vs in-process loop | Power transfer | Energy balance |
+  |---|---|---|---|---|
+  | Same as DEVSIM | 439.6608 K | −2e-5 K | exact | 2e-12 |
+  | gmsh unstructured, 0.1 µm | 439.6643 K | +3.5 mK | exact | 3e-14 |
+  | gmsh structured, 0.07 µm | 439.6684 K | +7.5 mK | 1e-16 | 7e-13 |
+
+  The coupling registry lists it as a two-way `precice` coupling.
+
+## simws 0.9c: second engines, model-form budgets, Dask, container, paper package
+
+- **Engine pairs** (`simws.validation.engine_pairs`; rules `engine_pairs_dft` (DFT env) and `engine_pairs`
+  (tcad env)). The tolerances were fixed on 4 Nov 2026, before any cross-engine run:
+
+  | Pair | Reference problem | Tolerance |
+  |---|---|---|
+  | QE (norm-conserving) vs GPAW (PAW) | Si PBE: a0, B0 (same 7-point a grid), band energies at 5.431 Å | 0.5 %, 5 %, 50 meV |
+  | scikit-fem vs FEniCSx | Same .msh: two-region Poisson (nodal); nonlinear heat k(T) with the same Picard iteration and one-point quadrature (T_max) | 1e-9, 1e-8 |
+  | DEVSIM vs Solcore (Sesame drift-diffusion) | 1D Si pn diode, identical parameters: dark J at 0.3–0.6 V; J_sc under uniform generation | 2 %, 1 % |
+
+  Results so far:
+  - DEVSIM vs Solcore agree to 0.06 % (dark current) and 2e-5 (J_sc).
+  - GPAW alone gives a0 = 5.4755 Å, B0 = 88.5 GPa and a PBE indirect gap of 0.570 eV.
+  - The QE and FEniCSx sides run on the laptop.
+- **Model-form budgets** (`simws.hub.model_form`):
+  - Each pair's spread (range/√12) is written to `<store>/model_form.json` by the `engine_pairs` rule.
+  - At paper fidelity, the hub adds it as the `model_form` component of every sigma-kind quantity in that class:
+    device currents from the DD pair, temperatures from the FEM pair, lattice constant, modulus and gap from the DFT
+    pair.
+  - Existing components are never overwritten.
+- **Dask runtime** (`simws.hub.runtime.Runtime`). `with Runtime(n_workers=4) as rt: rt.map(adapter, params_list)`
+  runs hub jobs in parallel with the same keys, cache and commits:
+  - identical requests run once;
+  - committed jobs are cache hits;
+  - workers × threads never exceed the cores;
+  - each worker's memory limit is the job budget.
+
+  Without Dask it falls back to a process pool.
+- **Container**: `container/simws.def` (Apptainer) and `container/Dockerfile` rebuild every env from
+  `envs/*.explicit.txt` (`tools/container_envs.py`). Charon and `sim_data/` stay on the host (bind-mount them).
+- **Paper package v1** (`tools/paper_package.py`): `tools/release.py`'s bundle plus:
+  - `validation/` (every gate record and VALIDATION.md);
+  - `budgets/` (BUDGETS.md of paper-fidelity results and the model-form registry);
+  - `container/`;
+  - REPRODUCE.md.
+
+  It stays local, and nothing is uploaded.
+- **SiC Schottky held-out gate** (`simws.validation.sic_schottky_heldout`; `workflow/scripts/sic_heldout.py`).
+  - The model is thermionic emission with image-force lowering, WKB tunnelling, a Gaussian barrier inhomogeneity
+    (Werner–Güttler) and series resistance. φB0, σs and R_s are fitted at the fit temperatures only.
+  - A* = 146 A cm⁻² K⁻² and Nc(300 K) = 1.7e19 cm⁻³ are **provisional**.
+  - Acceptance: every held-out point between 1e-7 and 1e-1 A/cm² within a factor of 1.3. This is proposed, and is to
+    be confirmed together with the dataset.
+  - The harness refuses a dataset without `"approved": true` in its meta.json, and refuses overlapping fit and
+    held-out temperatures. A synthetic round trip passes; the gate itself is **pending** until you approve the
+    dataset.
+
 ## Single-event upset example
 
 ```python

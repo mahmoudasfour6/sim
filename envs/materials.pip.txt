@@ -11,7 +11,7 @@ boto3==1.43.123
 botocore==1.43.123
 Brotli @ file:///home/conda/feedstock_root/build_artifacts/brotli-split_1792653565170/work
 cached-property @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_cached_property_1787678456/work
-certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1792763948800/work/certifi
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1793720052803/work/certifi
 charset-normalizer @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_charset-normalizer_1790766086/work
 chgnet==0.4.2
 click==8.5.0

@@ -16,4 +16,4 @@ adapters    built-in adapters wrapping the engines (DEVSIM, Quantum ESPRESSO, ra
 conventions sign/ordering/frame conventions registry and converters
 queue       overnight job queue (python -m simws.queue)
 """
-__version__ = "0.9.0a0"
+__version__ = "0.9.0c0"

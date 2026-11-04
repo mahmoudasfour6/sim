@@ -535,17 +535,21 @@ def main(argv=None):
                    else ("PASS" if r["pass"] else "FAIL"))
         print(f"\n{label}{' Schottky diode' if sk else ''} (T = {cfg['T']:g} K, SRH {'on' if cfg['srh'] else 'off'}): {n_ok} Charon bias points; "
               f"worst gated difference {100 * r['worst_rel_diff']:.2f} % -> {verdict}")
-        # noise-floor margin: the gated points must sit far above Charon's own current noise (its "current" at the
-        # lowest biases, where both codes' true currents are far smaller) and above the gate floor
+        # noise-floor margin: the gated points must sit far above Charon's own current noise, i.e. its "current" at
+        # zero bias, where the true current is zero (detailed balance; DEVSIM gives 1e-20..1e-25), and above the gate
+        # floor. (Low forward bias is no noise probe: a Schottky diode already carries 1e-4 A/cm^2 at 0.05 V.)
         gated = [x for x in r["currents"] if x["gated"]]
         if gated and not diag:
-            noise = max([abs(x["J_charon"]) for x in r["currents"] if x["V"] <= 0.1] or [0.0])
+            noise = max([abs(x["J_charon"]) for x in r["currents"] if x["V"] == 0.0] or [0.0])
             jmin = min(min(x["J_charon"], x["J_devsim"]) for x in gated)
             margin = jmin / noise if noise > 0 else float("inf")
             r["noise_floor"] = {"charon_low_bias_A_cm2": noise, "smallest_gated_A_cm2": jmin, "margin": margin}
-            if margin < 100 or jmin < 10 * J_FLOOR:
+            # the gate floor (1e-6 A/cm^2) is a convention; what makes a gated point trustworthy is its distance from
+            # the solver noise, so only that margin warns (the floor ratio is recorded)
+            r["noise_floor"]["floor_ratio"] = jmin / J_FLOOR
+            if margin < 100:
                 warns.append(f"WARN {label}: smallest gated current {jmin:.3g} A/cm^2 is only {margin:.3g}x Charon's "
-                             f"low-bias noise ({noise:.3g}) / {jmin / J_FLOOR:.3g}x the gate floor")
+                             f"zero-bias noise current ({noise:.3g})")
             Path(a.dir, f"{kind}_{label}.json").write_text(json.dumps(r, indent=1))
         for row in r["currents"]:
             print(f"  V={row['V']:.2f}  Charon {row['J_charon']:.4e}  DEVSIM {row['J_devsim']:.4e}  "

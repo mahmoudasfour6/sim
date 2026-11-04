@@ -166,7 +166,7 @@ https://conda.anaconda.org/conda-forge/linux-64/backports.zstd-1.8.0-py311hdac8c
 https://conda.anaconda.org/conda-forge/linux-64/brotli-python-1.2.1-py311heb3be6f_0.conda#fea6c1e36427ac60dc3ecd31314dffe8
 https://conda.anaconda.org/conda-forge/noarch/cached_property-2.0.1-pyhcf101f3_0.conda#256d863ded0f79464391a075944d24a6
 https://conda.anaconda.org/conda-forge/linux-64/cairo-1.18.6-h3c89d7e_0.conda#7920701f9abcb488411495742cf365a7
-https://conda.anaconda.org/conda-forge/noarch/certifi-2026.10.23-pyhd8ed1ab_0.conda#484e26532435808425148c83bf58aa0b
+https://conda.anaconda.org/conda-forge/noarch/certifi-2026.10.23-pyhd8ed1ab_3.conda#6e761a5c8fd92be3a9fec46ade31b481
 https://conda.anaconda.org/conda-forge/noarch/cloudpickle-3.1.2-pyhcf101f3_1.conda#61b8078a0905b12529abc622406cb62c
 https://conda.anaconda.org/conda-forge/linux-64/cmake-4.4.5-hff7ac6b_0.conda#e18e63b15ab8bf430536d4f76abef6ad
 https://conda.anaconda.org/conda-forge/noarch/cpython-3.11.18-py311hd8ed1ab_0.conda#d85bc1f0651fab6fb5f288b14731f954

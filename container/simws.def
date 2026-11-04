@@ -1,0 +1,45 @@
+Bootstrap: docker
+From: condaforge/miniforge3:24.9.2-0
+
+# simws container (0.9c): every conda environment rebuilt from the explicit locks in envs/ (exact builds, md5
+# checked), pip-only packages from envs/<env>.pip.txt, and the repository at /opt/sim_workspace.
+#   apptainer build simws.sif container/simws.def          (run from the repository root, after the 0.9c commit)
+#   apptainer run --bind $PWD/results:/opt/sim_workspace/results simws.sif snakemake --cores 8 studies
+# Not inside: Charon (built from source on the host; its cross-checks run there) and the large data under
+# sim_data/ (bind it: --bind ~/sim_workspace/sim_data:/opt/sim_workspace/sim_data).
+
+%files
+    envs /opt/sim_workspace/envs
+    simws /opt/sim_workspace/simws
+    workflow /opt/sim_workspace/workflow
+    config /opt/sim_workspace/config
+    tools /opt/sim_workspace/tools
+    tests /opt/sim_workspace/tests
+    pyproject.toml /opt/sim_workspace/pyproject.toml
+
+%post
+    set -e
+    apt-get update && apt-get install -y --no-install-recommends build-essential gfortran git && rm -rf /var/lib/apt/lists/*
+    cd /opt/sim_workspace
+    /opt/conda/bin/python tools/container_envs.py --envs-dir envs --prefix /opt/conda/envs
+    /opt/conda/bin/conda clean -afy
+    sed -i 's#^envs_root:.*#envs_root: /opt/conda/envs#' config/config.yaml
+    echo "simws container built $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /opt/sim_workspace/CONTAINER_BUILD
+
+%environment
+    export SIMWS_ROOT=/opt/sim_workspace
+    export PATH=/opt/conda/envs/workflow/bin:/opt/conda/bin:$PATH
+    export OMP_NUM_THREADS=1
+
+%runscript
+    cd /opt/sim_workspace
+    exec "$@"
+
+%test
+    cd /opt/sim_workspace
+    /opt/conda/envs/tcad/bin/python -c "import devsim, skfem, simws; print('simws', simws.__version__)"
+    PYTHONPATH=. /opt/conda/envs/tcad/bin/python -m pytest -q -p no:cacheprovider -o addopts= tests/unit -x -k "hub_core"
+
+%labels
+    org.simws.version 0.9c
+    org.simws.source https://github.com/ (private repository; see PROVENANCE.json in the paper package)

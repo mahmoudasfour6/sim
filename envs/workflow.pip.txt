@@ -3,7 +3,7 @@ aiohttp==3.14.5
 aiohttp-retry==2.9.1
 aiosignal==1.4.0
 amqp==5.4.1
-annotated-types==0.8.0
+annotated-types @ file:///home/conda/feedstock_root/build_artifacts/annotated-types_1784935130617/work
 antlr4-python3-runtime==4.9.3
 appdirs==1.4.4
 argparse-dataclass==2.0.0
@@ -43,6 +43,8 @@ exceptiongroup @ file:///home/conda/feedstock_root/build_artifacts/exceptiongrou
 fastjsonschema==2.22.2
 filelock==4.2.6
 flatten-dict==0.5.0
+flexcache @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_flexcache_1788605834/work
+flexparser @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_flexparser_1788605800/work
 flufl.lock==9.2.0
 frozenlist==1.8.0
 fsspec==2026.9.0
@@ -75,6 +77,7 @@ orjson==3.13.0
 packaging==25.0
 pandas @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pandas_1792679037/work
 pathspec==1.1.1
+Pint @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pint_1792446201/work
 pip @ file:///home/conda/feedstock_root/build_artifacts/pip_1792524215381/work
 platformdirs==4.14.2
 pluggy @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pluggy_1792063298/work
@@ -83,9 +86,9 @@ propcache==0.5.4
 psutil==7.2.2
 PuLP==3.3.2
 pycparser==3.12
-pydantic==2.14.2
+pydantic @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pydantic_h5ded981_1793349177/work
 pydantic-settings==2.16.2
-pydantic_core==2.50.2
+pydantic_core @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pydantic-core_hc767a74_1793340168/work
 pydot==4.0.1
 pygit2==1.20.1
 Pygments @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pygments_1786995678/work
@@ -125,7 +128,7 @@ tomli @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_toml
 tomlkit==0.15.2
 tqdm==4.70.1
 traitlets==5.16.1
-typing-inspection==0.4.4
+typing-inspection @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing-inspection_1786818918/work
 typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1783002732/work
 tzdata @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-tzdata_h5ded981_1793205938/work
 tzlocal==5.4.5

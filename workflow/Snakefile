@@ -63,6 +63,8 @@ rule studies:
         f"{RES}/dft/checks.json",
         f"{RES}/flagship_a/flagship_a.json",
         f"{RES}/cryo_gate/cryo_gate.json",
+        f"{RES}/gate_0p9b/gate_0p9b.json",
+        f"{RES}/engine_pairs/engine_pairs.json",
 
 
 rule materials_table:
@@ -337,6 +339,47 @@ rule cryo_gate:
     params: py=py("tcad"), env=threads_env(1), out=f"{RES}/cryo_gate", fl=f"{RES}/flagship_a/flagship_a.json"
     log: "logs/cryo_gate.log"
     shell: "rm -rf {params.out}/store; {params.env} {params.py} workflow/scripts/cryo_gate.py --outdir {params.out} --flagship {params.fl} > {log} 2>&1"
+
+
+STORE = os.path.expanduser(str((config.get("hub") or {}).get("store") or os.environ.get("SIMWS_STORE") or f"{ROOT}/store"))
+
+GEO_SRC = ["simws/geometry.py", "simws/transfer.py", "simws/coupling/precice_bridge.py",
+           "simws/coupling/electrothermal.py", "simws/tcad/contacts.py", "simws/tcad/small_signal.py",
+           "simws/validation/contact_checks.py", "simws/validation/small_signal_checks.py",
+           "simws/validation/geometry_checks.py"]
+
+
+rule gate_0p9b:
+    input: HUB_SRC + GEO_SRC + ["workflow/scripts/gate_0p9b.py"]
+    output: f"{RES}/gate_0p9b/gate_0p9b.json"
+    threads: 2
+    resources: mem_mb=4000
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/gate_0p9b"
+    log: "logs/gate_0p9b.log"
+    shell: "{params.env} {params.py} workflow/scripts/gate_0p9b.py --outdir {params.out} > {log} 2>&1"
+
+
+rule engine_pairs_dft:
+    input: "simws/validation/engine_pairs.py", "simws/dft/gpaw_engine.py", "simws/dft/qe.py",
+           "workflow/scripts/engine_pairs.py"
+    output: f"{RES}/engine_pairs/dft.json"
+    threads: 1
+    resources: mem_mb=3000
+    params: py=py(DFT_ENV), env=threads_env(1), out=f"{RES}/engine_pairs"
+    log: "logs/engine_pairs_dft.log"
+    shell: "{params.env} {params.py} workflow/scripts/engine_pairs.py --outdir {params.out} --parts dft > {log} 2>&1"
+
+
+rule engine_pairs:
+    input: "simws/validation/engine_pairs.py", "simws/fem/dolfinx_engine.py", "simws/hub/model_form.py",
+           "workflow/scripts/engine_pairs.py", f"{RES}/engine_pairs/dft.json"
+    output: f"{RES}/engine_pairs/engine_pairs.json"
+    threads: 1
+    resources: mem_mb=3000
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/engine_pairs", store=STORE
+    log: "logs/engine_pairs.log"
+    shell: "{params.env} {params.py} workflow/scripts/engine_pairs.py --outdir {params.out} --parts fem,dd "
+           "--store {params.store} > {log} 2>&1"
 
 
 rule paper:

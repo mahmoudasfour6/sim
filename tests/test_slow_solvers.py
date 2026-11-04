@@ -451,3 +451,40 @@ def test_simws_charon_xcheck():
     for f in files:
         r = json.loads(f.read_text())
         assert r["pass"], (f.name, r["worst_rel_diff"], r.get("hint"))
+
+
+# --------------------------------------------------------------------------- simws 0.9b (contacts, AC/noise, geometry, coupling)
+def test_simws_gate_0p9b(tmp_path, golden):
+    """0.9b gate: thermionic emission vs closed form to 1e-4, f_T within 5 % of 1/(2 pi tau), field transfers
+    conserving integrals to 1e-8, preCICE electro-thermal coupling (tolerances in workflow/scripts/gate_0p9b.py)."""
+    run_in_env("tcad", [env_python("tcad"), REPO / "workflow" / "scripts" / "gate_0p9b.py", "--outdir", tmp_path],
+               REPO, timeout=2 * 3600, threads=1, extra_env=_simws_env())
+    r = json.loads((tmp_path / "gate_0p9b.json").read_text())
+    assert r["pass"], {k: v.get("pass") for k, v in r.items() if isinstance(v, dict)}
+    ft = {f"{row['ge_peak']}_{row['VBE']}": row["fT_ac_GHz"] for row in r["small_signal"]["hbt_ft"]["rows"]}
+    golden.verify({"simws.0p9b.fT_SiGe_0p85_GHz": ft["0.15_0.85"], "simws.0p9b.fT_Si_0p85_GHz": ft["0.0_0.85"],
+                   "simws.0p9b.precice_Tmax_5V_K": r["geometry"]["precice"]["same_mesh"][-1]["T_max_K"]})
+
+
+# --------------------------------------------------------------------------- simws 0.9c (engine pairs, held-out gate)
+def test_simws_engine_pairs():
+    """0.9c gate: each engine pair within the tolerances fixed on 2026-11-04 (results/engine_pairs, written by the
+    workflow rules engine_pairs_dft and engine_pairs)."""
+    import pytest as _pt
+    f = REPO / "results" / "engine_pairs" / "engine_pairs.json"
+    if not f.is_file():
+        _pt.skip("run: snakemake studies (rules engine_pairs_dft, engine_pairs)")
+    r = json.loads(f.read_text())
+    assert r["pass"], {k: r[k].get("pass") for k in ("dft", "fem", "dd") if isinstance(r.get(k), dict)}
+
+
+def test_simws_sic_schottky_heldout(tmp_path):
+    """0.9c gate: SiC Schottky I-V(T) against the approved held-out dataset (skipped until one is approved)."""
+    import subprocess as _sp
+    import pytest as _pt
+    p = _sp.run([str(env_python("tcad")), str(REPO / "workflow" / "scripts" / "sic_heldout.py"), "--outdir",
+                 str(tmp_path)], cwd=REPO, env={**__import__("os").environ, **_simws_env()}, capture_output=True,
+                text=True, timeout=3600)
+    if p.returncode == 3:
+        _pt.skip("no approved SiC Schottky dataset yet (simws/validation/data/sic_schottky/<name>/meta.json)")
+    assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
