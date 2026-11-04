@@ -1,0 +1,5 @@
+date,release,hours,category,note
+2026-11-05,0.9,3.0,plumbing,"0.9b/c install on the laptop: package names (libprecice), workflow env deps (pint), snakemake -q/tail syntax, FEniCSx compiler, DEVSIM/OpenBLAS import order (retrospective estimate)"
+2026-11-05,0.9,1.0,plumbing,"Charon deck aborts and xcheck plumbing in 0.9a (retrospective estimate)"
+2026-11-05,0.9,1.5,plumbing,"container/cloud workspace issues: preCICE build, pw.x crash in the cloud, relative-path and spawn bugs (retrospective estimate)"
+2026-11-05,0.9,6.0,research,"contacts, small-signal/noise, geometry and transfer, engine pairs, DFT convergence and pseudopotential finding, SiC held-out protocols 1-2 (retrospective estimate)"

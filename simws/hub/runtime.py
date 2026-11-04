@@ -58,8 +58,15 @@ class Runtime:
             if self.address:
                 self._client = Client(self.address)
             else:
+                # workers are spawned processes: the calling script needs an `if __name__ == "__main__":` guard
+                mem = self.budget.memory_gb
+                try:
+                    import psutil
+                    mem = min(mem, 0.8 * psutil.virtual_memory().total / 2 ** 30 / self.n_workers)
+                except Exception:  # noqa: BLE001
+                    pass
                 self._cluster = LocalCluster(n_workers=self.n_workers, threads_per_worker=1, processes=True,
-                                             memory_limit=f"{self.budget.memory_gb}GB", dashboard_address=None)
+                                             memory_limit=f"{mem:.2f}GB", dashboard_address=None)
                 self._client = Client(self._cluster)
             self.kind = "dask"
         else:

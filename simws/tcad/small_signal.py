@@ -39,6 +39,17 @@ def bias(VBE: float, VCE: float, opts=None, cb=None):
     ramp_source("VB", VBE, start=vb0, step=0.05, callback=cb, **o)
 
 
+def mobility_callback(case):
+    """Klaassen mobility depends on the carriers (cryo=True): relax it at every bias step, as the Gummel adapter does.
+    The AC solve itself linearises at frozen mobility (d mu / d n is not in DEVSIM's Jacobian); the charge-control
+    f_T includes it through the finite differences, so the AC-vs-charge-control difference bounds that omission."""
+    if not getattr(case, "cryo", False):
+        return None
+    from simws.tcad.physics import relax_mobility
+    o = dict(absolute_error=1e10, relative_error=1e-10, maximum_iterations=40)
+    return lambda _v=None: relax_mobility("d", "si", o)
+
+
 def dc_currents():
     """Terminal currents into the device (A per cm of emitter length): emitter, base, collector."""
     return {c: -_src_current(k) for k, c in zip(SOURCES, ("emitter", "base", "collector"))}
@@ -78,13 +89,18 @@ def hole_charge():
     return Q_E * float(np.sum(p * v))
 
 
-def charge_control(VBE, VCE, dV=1e-3, opts=None):
-    """g_m, C_in = dQ_B/dV_BE and tau = C_in / g_m by central differences at fixed V_CE."""
+def charge_control(VBE, VCE, dV=1e-3, opts=None, cb=None):
+    """g_m, C_in = dQ_B/dV_BE and tau = C_in / g_m by central differences at fixed V_CE (cb: per-step callback,
+    e.g. the Klaassen mobility relaxation of cryogenic devices, so each point is self-consistent)."""
     vals = []
     for v in (VBE - dV, VBE + dV):
-        bias(v, VCE, opts)
+        bias(v, VCE, opts, cb=cb)
+        if cb:
+            cb(v)
         vals.append((dc_currents()["collector"], hole_charge()))
-    bias(VBE, VCE, opts)
+    bias(VBE, VCE, opts, cb=cb)
+    if cb:
+        cb(VBE)
     gm = (vals[1][0] - vals[0][0]) / (2 * dV)
     Cin = (vals[1][1] - vals[0][1]) / (2 * dV)
     return {"gm_S_per_cm": gm, "Cin_F_per_cm": Cin, "tau_s": Cin / gm, "fT_charge_Hz": gm / (2 * math.pi * Cin)}
@@ -96,9 +112,12 @@ def hbt_small_signal(case=None, VBE=0.8, VCE=1.0, decades=(0.05, 0.1, 0.2), opts
     from simws.tcad.hbt import HBTCase, build
     case = case or HBTCase()
     build(case, circuit=True)
-    bias(VBE, VCE, opts)
+    cb = mobility_callback(case)
+    bias(VBE, VCE, opts, cb=cb)
+    if cb:
+        cb(VBE)
     dc = dc_currents()
-    cc = charge_control(VBE, VCE, opts=opts)
+    cc = charge_control(VBE, VCE, opts=opts, cb=cb)
     f_lo = 1e-4 * cc["fT_charge_Hz"]
     beta0 = abs(figures(y_params(f_lo), f_lo)["h21"])
     ac = [figures(y_params(r * cc["fT_charge_Hz"]), r * cc["fT_charge_Hz"], beta0) for r in decades]

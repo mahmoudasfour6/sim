@@ -382,6 +382,20 @@ rule engine_pairs:
            "--store {params.store} > {log} 2>&1"
 
 
+FLAGSHIP_AC_SRC = ["simws/tcad/small_signal.py", "workflow/scripts/flagship_a_ac.py", "simws/hub/runtime.py",
+                   f"{RES}/flagship_a/flagship_a.json"]
+
+
+rule flagship_a_ac:
+    input: HUB_SRC + FLAGSHIP_AC_SRC
+    output: f"{RES}/flagship_a_ac/flagship_a_ac.json"
+    threads: 4
+    resources: mem_mb=8000
+    params: py=py("tcad"), env=threads_env(1), out=f"{RES}/flagship_a_ac"
+    log: "logs/flagship_a_ac.log"
+    shell: "{params.env} {params.py} workflow/scripts/flagship_a_ac.py --outdir {params.out} --workers {threads} > {log} 2>&1"
+
+
 rule paper:
     input: rules.all.input, rules.studies.input
     output: f"{RES}/figures/INDEX.json"

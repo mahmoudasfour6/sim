@@ -413,7 +413,8 @@ class HbtAc(Adapter):
                  OutputSpec(name="hbt.fmax", unit="Hz", constraint="positive"),
                  OutputSpec(name="hbt.tau_charge", unit="s", constraint="positive",
                             description="dQ_B/dI_C at fixed V_CE (quasi-static charge control)"),
-                 OutputSpec(name="hbt.IC", unit="A/m", constraint="positive")],
+                 OutputSpec(name="hbt.IC", unit="A/m", constraint="positive"),
+                 OutputSpec(name="hbt.IB", unit="A/m", constraint="positive")],
         native_conventions=CUR,
         validity={"T": (250.0, 400.0)},
         physics_edges=[PhysicsEdge(output="hbt.fT", input="hbt.tau_charge", mechanism="f_T = 1/(2 pi tau)")],
@@ -438,11 +439,16 @@ class HbtAc(Adapter):
                 raise NotConverged(str(e)) from e
             raise
         rows = []
+        cb = SS.mobility_callback(case)
+        if cb:
+            ctx.flags.append("ac:frozen_mobility_linearisation")
         try:
             for v in VBE:
-                SS.bias(float(v), VCE)
+                SS.bias(float(v), VCE, cb=cb)
+                if cb:
+                    cb(float(v))
                 dc = SS.dc_currents()
-                cc = SS.charge_control(float(v), VCE)
+                cc = SS.charge_control(float(v), VCE, cb=cb)
                 f_lo = 1e-4 * cc["fT_charge_Hz"]
                 beta0 = SS.figures(SS.y_params(f_lo), f_lo)["h21"]
                 f = 0.1 * cc["fT_charge_Hz"]
@@ -468,7 +474,8 @@ class HbtAc(Adapter):
         qs = [ctx.quantity("hbt.fT", [r["fT"] for r in rows], "Hz", axes=ax),
               ctx.quantity("hbt.fmax", [r["fmax"] for r in rows], "Hz", axes=ax),
               ctx.quantity("hbt.tau_charge", [r["tau"] for r in rows], "s", axes=ax),
-              ctx.quantity("hbt.IC", [r["IC"] * per_m for r in rows], "A/m", axes=ax, conventions=CUR)]
+              ctx.quantity("hbt.IC", [r["IC"] * per_m for r in rows], "A/m", axes=ax, conventions=CUR),
+              ctx.quantity("hbt.IB", [r["IB"] * per_m for r in rows], "A/m", axes=ax, conventions=CUR)]
         if "S_IC" in rows[0]:
             qs += [ctx.quantity("hbt.S_IC", [r["S_IC"] * per_m for r in rows], "A**2/Hz/m", axes=ax),
                    ctx.quantity("hbt.S_IB", [r["S_IB"] * per_m for r in rows], "A**2/Hz/m", axes=ax)]
