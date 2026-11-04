@@ -101,7 +101,12 @@ class HbtGummel(Adapter):
             rows, jn = self._sweep(ctx, case, VBE, VCB, want_jn, record=True)
             ctx.diagnostics["case"] = dataclasses.asdict(case)
             return {"VBE": VBE[:len(rows)], "I": np.array(rows), "jn": np.array(jn), "T": case.T}
-        # refinement study: coarse -> fine; reported values are the finest mesh's, sigma_num from its GCI
+        # refinement study: coarse -> fine; reported values are the finest mesh's, sigma_num from its GCI. The 0.8 mesh
+        # (2 nm at the abrupt emitter-base step) is outside the asymptotic range, so paper fidelity grades the mesh at
+        # the junctions (HBTCase.eb_refine) unless the case sets it explicitly
+        if "eb_refine" not in (ctx.param("case", {}) or {}):
+            case = dataclasses.replace(case, eb_refine=True)
+            ctx.flags.append("mesh:eb_refine")
         levels = []
         for k in range(self.MESH_LEVELS):
             c = dataclasses.replace(case, mesh_scale=case.mesh_scale / self.MESH_RATIO ** k)
@@ -395,3 +400,82 @@ class MmsPoisson(Adapter):
 
     def self_check(self, job, ctx, qs):
         return [] if ctx.verification["code"]["passed"] else [f"observed order {qs[0].value:.3f} is not 2"]
+
+
+# ---------------------------------------------------------------------------------------------------- HBT AC (0.9b)
+class HbtAc(Adapter):
+    manifest = Manifest(
+        name="devsim.hbt_ac", version="1.0", env="tcad", engine="devsim", engine_version="env-locked",
+        description="Small-signal AC of the 2D HBT (simws.tcad.small_signal): f_T (h21, single-pole fit), f_max "
+                    "(Mason's U), charge-control transit time, low-frequency collector/base current noise",
+        inputs=["VBE"],
+        outputs=[OutputSpec(name="hbt.fT", unit="Hz", constraint="positive"),
+                 OutputSpec(name="hbt.fmax", unit="Hz", constraint="positive"),
+                 OutputSpec(name="hbt.tau_charge", unit="s", constraint="positive",
+                            description="dQ_B/dI_C at fixed V_CE (quasi-static charge control)"),
+                 OutputSpec(name="hbt.IC", unit="A/m", constraint="positive")],
+        native_conventions=CUR,
+        validity={"T": (250.0, 400.0)},
+        physics_edges=[PhysicsEdge(output="hbt.fT", input="hbt.tau_charge", mechanism="f_T = 1/(2 pi tau)")],
+        citations=["devsim"],
+    )
+
+    def run(self, job, ctx):
+        _devsim_quiet()
+        from simws.tcad.hbt import HBTCase, build
+        from simws.tcad import small_signal as SS
+        extra = {}
+        if job.key.params.get("T") is not None:
+            extra["T"] = float(ctx.param("T", unit="K"))
+        case = _case(HBTCase, _HBT_UNITS, ctx, extra)
+        VBE = np.atleast_1d(ctx.param("VBE", unit="V")).astype(float)
+        VCE = float(ctx.param("VCE", 1.0, unit="V"))
+        noise = bool(ctx.param("noise", False))
+        try:
+            build(case, circuit=True)
+        except Exception as e:
+            if _no_convergence(e):
+                raise NotConverged(str(e)) from e
+            raise
+        rows = []
+        try:
+            for v in VBE:
+                SS.bias(float(v), VCE)
+                dc = SS.dc_currents()
+                cc = SS.charge_control(float(v), VCE)
+                f_lo = 1e-4 * cc["fT_charge_Hz"]
+                beta0 = SS.figures(SS.y_params(f_lo), f_lo)["h21"]
+                f = 0.1 * cc["fT_charge_Hz"]
+                fig = SS.figures(SS.y_params(f), f, beta0)
+                row = {"VBE": float(v), "IC": dc["collector"], "IB": dc["base"], "fT": fig["fT_single_pole"],
+                       "fmax": fig["fmax_est"], "tau": cc["tau_s"], "fT_charge": cc["fT_charge_Hz"]}
+                if noise:
+                    row["S_IC"] = SS.current_noise("VC.I")["S_A2_per_Hz"]
+                    row["S_IB"] = SS.current_noise("VB.I")["S_A2_per_Hz"]
+                rows.append(row)
+        except Exception as e:
+            if _no_convergence(e):
+                raise NotConverged(str(e)) from e
+            raise
+        ctx.diagnostics["case"] = dataclasses.asdict(case)
+        ctx.diagnostics["fT_ac_vs_charge"] = [r["fT"] / r["fT_charge"] - 1 for r in rows]
+        return rows
+
+    def collect(self, job, ctx, rows):
+        V = [r["VBE"] for r in rows]
+        ax = [{"name": "VBE", "unit": "V", "values": V}]
+        per_m = 100.0                                  # per cm of emitter length -> per m
+        qs = [ctx.quantity("hbt.fT", [r["fT"] for r in rows], "Hz", axes=ax),
+              ctx.quantity("hbt.fmax", [r["fmax"] for r in rows], "Hz", axes=ax),
+              ctx.quantity("hbt.tau_charge", [r["tau"] for r in rows], "s", axes=ax),
+              ctx.quantity("hbt.IC", [r["IC"] * per_m for r in rows], "A/m", axes=ax, conventions=CUR)]
+        if "S_IC" in rows[0]:
+            qs += [ctx.quantity("hbt.S_IC", [r["S_IC"] * per_m for r in rows], "A**2/Hz/m", axes=ax),
+                   ctx.quantity("hbt.S_IB", [r["S_IB"] * per_m for r in rows], "A**2/Hz/m", axes=ax)]
+        return qs
+
+    def self_check(self, job, ctx, qs):
+        # the AC f_T and the quasi-static charge-control f_T must agree (0.9b gate: 5 %)
+        d = ctx.diagnostics.get("fT_ac_vs_charge", [])
+        bad = [x for x in d if abs(x) > 0.05]
+        return [f"AC f_T differs from charge-control f_T by {100 * max(map(abs, bad)):.1f} %"] if bad else []

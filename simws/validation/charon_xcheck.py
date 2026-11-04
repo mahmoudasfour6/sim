@@ -38,7 +38,7 @@ L_UM, XJ_UM, W_UM = 1.0, 0.5, 0.5
 # resolve the SRH peak (width ~ kT/qE): there the two codes' recombination currents differ by up to +-14 % about the
 # converged value with opposite signs (node lumping vs quadrature), which is discretisation, not physics.
 DATA = Path(__file__).with_name("data")
-MESHES = {"fine": ("pndiode_fine.exo", 0.00125), "10nm": ("pndiode_10nm.exo", 0.01)}
+MESHES = {"fine": ("pndiode_fine.exo", 0.00125), "10nm": ("pndiode_10nm.exo", 0.01), "sk": ("sk_2p5nm.exo", 0.0025)}
 DX_UM = MESHES["fine"][1]
 GATE = 0.02
 J_FLOOR = 1e-6                                        # A/cm^2
@@ -222,8 +222,144 @@ def write_decks(outdir) -> list:
         (out / f"runlist_{label}.txt").write_text("\n".join(names) + "\n")
         (out / f"case_{label}.json").write_text(json.dumps({**c, **cfg, "biases": biases(cfg["T"])}, indent=1))
         order += names
+    order += write_sk_decks(out)
     (out / "runlist_all.txt").write_text("\n".join(order) + "\n")
     return order
+
+
+# ------------------------------------------------------------------------------------------------ Schottky diode (0.9b)
+# n-Si 1e16 cm^-3, 1 um, Schottky anode (work function 4.75 eV, affinity 4.05 eV: phi_Bn = 0.70 eV) at x = 0, ohmic
+# cathode; thermionic emission with A_n* = 112, A_p* = 32 A cm^-2 K^-2 behind drift-diffusion (combined TE-diffusion),
+# Boltzmann statistics, full ionization, fixed mobilities, SRH. Charon's Schottky contact (Dirichlet potential, Neumann
+# carrier fluxes q v (n - n0B)) has no image-force lowering or tunnelling unless asked, like ours by default.
+SK = dict(N=1e16, wf=4.75, chi=4.05, A_n=112.0, A_p=32.0, mu_n=1000.0, mu_p=400.0, tau=1e-7)
+SK_CASES = {"SK300": 300.0, "SK200": 200.0}
+
+
+def sk_biases(T):
+    return [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3] if T >= 250 else [0.0, 0.1, 0.2, 0.3, 0.35, 0.4, 0.45]
+
+
+def _sk_deck(T, imp, out, V, ic):
+    c = case(T)
+    s = (300.0 / T) ** 1.5
+    index = "" if imp.startswith("sk_") else " at index 1"
+    return f"""Import State File {imp}{index}
+
+start output parameters
+      Output State File {out}
+      unscale variables is on
+end output parameters
+
+tpetra is on
+lattice temperature = {T!r}
+concentration scaling = {SK['N']!r}
+
+start Physics Block Semiconductor
+      geometry block is silicon
+      standard discretization type is drift diffusion cvfem
+      material model is siliconParameter
+      srh recombination is on
+      radiative recombination is off
+      auger recombination is off
+end Physics Block Semiconductor
+
+start Material Block siliconParameter
+      material name is Silicon
+      relative permittivity = {c['eps_r']!r}
+      start Effective DOS
+            Nc300 = {c['Nc'] * s!r}
+            Nv300 = {c['Nv'] * s!r}
+            Nc_F = 1.5
+            Nv_F = 1.5
+      end Effective DOS
+      start Band Gap
+            temperature dependence is on
+            300K gap = {c['Eg']!r}
+            alpha = 0.0
+            beta = 636.0
+            Chi300 = {SK['chi']!r}
+      end Band Gap
+      start Carrier Lifetime Block
+            electron lifetime is constant = {SK['tau']!r}
+            hole lifetime is constant = {SK['tau']!r}
+      end Carrier Lifetime Block
+      start uniform doping named Function1
+            type is donor
+            concentration = {SK['N']!r}
+      end uniform doping named Function1
+      fixed mobility for electrons is {SK['mu_n']!r}
+      fixed mobility for holes is {SK['mu_p']!r}
+end Material Block siliconParameter
+
+start Schottky BC for anode on silicon
+      work function = {SK['wf']!r}
+      voltage is fixed at {V!r}
+      electron Richardson Constant = {SK['A_n']!r}
+      hole Richardson Constant = {SK['A_p']!r}
+      type is electron
+end Schottky BC for anode on silicon
+
+BC is ohmic for cathode on silicon fixed at 0
+
+{ic}
+
+start solver block
+  start tpetra block
+    problem type is steady state
+    verbosity level is high
+    maximum number nonlinear iterations = 60
+  end
+  line search method is backtrack
+end solver block
+"""
+
+
+def write_sk_decks(outdir) -> list:
+    out = Path(outdir)
+    order = []
+    for label, T in SK_CASES.items():
+        names, prev = [], MESHES["sk"][0]
+        for k, V in enumerate(sk_biases(T)):
+            name = f"xc_{label}_dd_{int(round(V * 1000)):04d}mV"
+            (out / f"{name}.inp").write_text(_sk_deck(T, prev, f"{name}.exo", V, IC_MESH if k == 0 else IC_FILE))
+            names.append(name)
+            prev = f"{name}.exo"
+        (out / f"runlist_{label}.txt").write_text("\n".join(names) + "\n")
+        order += names
+    return order
+
+
+def devsim_schottky(T: float, dx_um: float = None, Vs=None) -> dict:
+    import simws.tcad  # noqa: F401
+    from devsim import (add_1d_contact, add_1d_mesh_line, add_1d_region, create_1d_mesh, create_device,
+                        finalize_mesh, get_contact_current, reset_devsim, solve)
+    from simws.materials import load
+    from simws.tcad.contacts import schottky_contact
+    from simws.tcad.physics import Physics, setup_region
+    from simws.tcad.solve import ramp_bias
+    dx = (dx_um or MESHES["sk"][1]) * 1e-4
+    reset_devsim()
+    create_1d_mesh(mesh="m")
+    add_1d_mesh_line(mesh="m", pos=0.0, ps=dx, tag="anode")
+    add_1d_mesh_line(mesh="m", pos=L_UM * 1e-4, ps=dx, tag="cathode")
+    for k in ("anode", "cathode"):
+        add_1d_contact(mesh="m", name=k, tag=k, material="metal")
+    add_1d_region(mesh="m", material="Si", region="r", tag1="anode", tag2="cathode")
+    finalize_mesh(mesh="m"); create_device(mesh="m", device="d")
+    mat = load("silicon")
+    phys = Physics(T=T, bgn=False, auger=False, srh=True, tau_n=SK["tau"], tau_p=SK["tau"], mu_n=SK["mu_n"],
+                   mu_p=SK["mu_p"])
+    setup_region("d", "r", mat, f"{SK['N']!r}", f"{SK['N']!r}", phys, {"anode": False, "cathode": False})
+    used = schottky_contact("d", "r", "anode", mat, phys, phi_Bn=SK["wf"] - SK["chi"], A_n=SK["A_n"], A_p=SK["A_p"])
+    opts = dict(absolute_error=1e10, relative_error=1e-10, maximum_iterations=60)
+    solve(type="dc", **opts)
+    J, Vs = [], list(Vs or sk_biases(T))
+    for V in Vs:
+        ramp_bias("d", "anode", V, step=0.05, **opts)
+        J.append(abs(sum(get_contact_current(device="d", contact="anode", equation=e)
+                         for e in ("ElectronContinuityEquation", "HoleContinuityEquation"))))
+    return {"T": T, "V": Vs, "J_A_cm2": J, "used": used, "dx_um": dx / 1e-4}
 
 
 # ------------------------------------------------------------------------------------------------ DEVSIM side
@@ -349,33 +485,51 @@ def compare(outdir, label: str, dev: dict | None = None) -> dict:
     return rep
 
 
+def compare_sk(outdir, label: str, dev: dict | None = None) -> dict:
+    ch = read_charon(outdir, label)
+    T = SK_CASES[label]
+    dev = dev or devsim_schottky(T)
+    rows, worst = [], 0.0
+    for V, Jc in zip(ch["V"], ch["J_A_cm2"]):
+        Jd = dev["J_A_cm2"][dev["V"].index(V)] if V in dev["V"] else float("nan")
+        gated = max(Jc, Jd) > J_FLOOR
+        rel = Jd / Jc - 1 if Jc > 0 else float("nan")
+        if gated:
+            worst = max(worst, abs(rel))
+        rows.append({"V": V, "J_charon": Jc, "J_devsim": Jd, "rel_diff": rel, "gated": gated})
+    return {"case": label, "T_K": T, "currents": rows, "densities": {}, "worst_rel_diff": worst, "gate": GATE,
+            "pass": bool(rows) and worst < GATE, "charon_unreadable": ch.get("unreadable", [])}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m simws.validation.charon_xcheck")
     ap.add_argument("action", choices=["write", "compare", "devsim"])
     ap.add_argument("dir")
-    ap.add_argument("--cases", nargs="+", default=list(CASES))
+    ap.add_argument("--cases", nargs="+", default=list(CASES) + list(SK_CASES))
     a = ap.parse_args(argv)
     if a.action == "write":
         print(" ".join(write_decks(a.dir)))
         return 0
     gate = {}
     for label in a.cases:
-        cfg = CASES[label]
+        sk = label in SK_CASES
+        cfg = {"T": SK_CASES[label], "srh": True} if sk else CASES[label]
         f = Path(a.dir, f"devsim_{label}.json")
         if a.action == "devsim":
-            r = devsim_diode(cfg["T"], cfg["srh"], MESHES[cfg.get("mesh", "fine")][1])
+            r = devsim_schottky(cfg["T"]) if sk else devsim_diode(cfg["T"], cfg["srh"], MESHES[cfg.get("mesh", "fine")][1])
             f.write_text(json.dumps(r, indent=1))
             print(json.dumps({"case": label, "V": r["V"], "J": r["J_A_cm2"]}))
             continue
         if not Path(a.dir, f"runlist_{label}.txt").exists():
             continue
-        r = compare(a.dir, label, json.loads(f.read_text()) if f.exists() else None)
+        dev = json.loads(f.read_text()) if f.exists() else None
+        r = compare_sk(a.dir, label, dev) if sk else compare(a.dir, label, dev)
         # the slow test asserts every comparison_T*.json; the SRH-off case is a diagnostic, not part of the gate
         # a case Charon could not run at all is recorded (gate.json) but is not a comparison
         kind = "diagnostic" if label in DIAGNOSTIC or not r["currents"] else "comparison"
         Path(a.dir, f"{kind}_{label}.json").write_text(json.dumps(r, indent=1))
         n_ok = sum(1 for x in r["currents"])
-        print(f"\n{label} (T = {cfg['T']:g} K, SRH {'on' if cfg['srh'] else 'off'}): {n_ok} Charon bias points; "
+        print(f"\n{label}{' Schottky diode' if sk else ''} (T = {cfg['T']:g} K, SRH {'on' if cfg['srh'] else 'off'}): {n_ok} Charon bias points; "
               f"worst gated difference {100 * r['worst_rel_diff']:.2f} % -> {'PASS' if r['pass'] else 'FAIL'}")
         for row in r["currents"]:
             print(f"  V={row['V']:.2f}  Charon {row['J_charon']:.4e}  DEVSIM {row['J_devsim']:.4e}  "
@@ -389,10 +543,11 @@ def main(argv=None):
         return 0
     cold = gate.get("T77") or (gate.get("T77c10") and "T77c10 (10 nm; fine-mesh 77 K run did not converge in Charon)")
     gate["gate_pass"] = bool(gate.get("T300") and gate.get("T150") and cold)
+    gate["schottky_pass"] = bool(gate.get("SK300") and gate.get("SK200"))   # 0.9b contact cross-check
     gate["cold_case"] = "T77" if gate.get("T77") else cold or None
     Path(a.dir, "gate.json").write_text(json.dumps(gate, indent=1))
     print(f"\nGATE: {'PASS' if gate['gate_pass'] else 'FAIL'} (T300 {gate.get('T300')}, T150 {gate.get('T150')}, "
-          f"cold case {gate['cold_case']})")
+          f"cold case {gate['cold_case']}); Schottky (0.9b): {'PASS' if gate['schottky_pass'] else 'FAIL'}")
     return 0 if gate["gate_pass"] else 1
 
 

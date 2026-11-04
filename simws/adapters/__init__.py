@@ -5,6 +5,7 @@ from simws.hub.adapter import register
 register("materials.intrinsic", "simws.adapters.materials_intrinsic:Intrinsic")
 register("devsim.hbt_gummel", "simws.adapters.tcad:HbtGummel")
 register("devsim.mos_cv", "simws.adapters.tcad:MosCv")
+register("devsim.hbt_ac", "simws.adapters.tcad:HbtAc")
 register("devsim.strike_hbt", "simws.adapters.tcad:StrikeHbt")
 register("devsim.mms_poisson", "simws.adapters.tcad:MmsPoisson")
 register("radiation.tid_mos", "simws.adapters.radiation:TidMos")

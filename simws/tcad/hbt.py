@@ -52,6 +52,10 @@ class HBTCase:
     cryo: bool = False         # 0.9a: freeze-out (Altermatt), Fermi-Dirac statistics, Klaassen mobility
     initial_guess: Optional[dict] = None   # node values from a previous temperature (continuation)
     mesh_scale: float = 1.0    # multiplies every mesh spacing (0.5 = twice as fine in x and y; refinement studies)
+    # 0.9b: the emitter-base doping step is abrupt, and with the 0.8 mesh (2 nm at the junction) the currents are not
+    # mesh-converged (IC -4 %, IB +0.7 % from 2 nm to 0.06 nm, converging at first order). eb_refine grades the mesh
+    # to 0.05 nm at the junction (and 0.2 nm at the base-collector junction), inside the asymptotic range
+    eb_refine: bool = False
     extended_precision: Optional[bool] = None   # None: automatic (cryo below 200 K), see simws.tcad.physics.Physics
 
 
@@ -71,10 +75,12 @@ def ge_profile(case: HBTCase):
     return (f"step(y - {y0})*step({y1} - y)*({case.ge_start} + {case.ge_peak - case.ge_start}*(y - {y0})/{y1 - y0})")
 
 
-def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lines=()):
+def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lines=(), circuit=False):
     """pre_setup(): runs after the device exists and before the physics (create solutions such as an ion-track
     footprint used by case.extra_generation). extra_charge: as in simws.tcad.physics.setup_region.
-    x_lines: extra (position_um, spacing_um) mesh lines, e.g. to resolve an ion track."""
+    x_lines: extra (position_um, spacing_um) mesh lines, e.g. to resolve an ion track.
+    circuit: the three contacts are circuit nodes driven by voltage sources VE, VB, VC (all 0 V at the start; ramp
+             them with simws.tcad.solve.ramp_source): needed for small-signal AC and noise (simws.tcad.small_signal)."""
     from devsim import add_2d_contact, finalize_mesh, create_device, reset_devsim
     from simws.materials import load
     from simws.tcad.mixed_mode import _mesh_2d
@@ -84,6 +90,13 @@ def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lin
     xl = sorted({(0, 0.05), (case.w_e - 0.05, 0.02), (case.w_e, 0.01), (case.w_e + 0.05, 0.02), (case.x_xb, 0.02),
                  (case.x_bc, 0.05), (case.width_um, 0.1)} | set(x_lines))
     yl = [(0, 0.005), (case.t_e, 0.002), (yb, 0.002), (yb + 0.1, 0.01), (case.y_sc, 0.05), (case.depth_um, 0.1)]
+    if case.eb_refine:
+        we = case.w_e
+        xl = sorted({(x, h) for x, h in xl if abs(x - we) > 0.009} |
+                    {(we - 0.008, 0.001), (we - 0.002, 0.0002), (we, 0.00005), (we + 0.002, 0.0002), (we + 0.008, 0.001)})
+        yl = sorted([(0, 0.005), (case.t_e - 0.008, 0.001), (case.t_e - 0.002, 0.0002), (case.t_e, 0.00005),
+                     (case.t_e + 0.002, 0.0002), (case.t_e + 0.008, 0.001), (yb - 0.003, 0.0005), (yb, 0.0002),
+                     (yb + 0.003, 0.0005), (yb + 0.1, 0.01), (case.y_sc, 0.05), (case.depth_um, 0.1)])
     s = case.mesh_scale
     _mesh_2d(case.width_um, case.depth_um, [(x, h * s) for x, h in xl], [(y, h * s) for y, h in yl])
     add_2d_contact(mesh="m", name="emitter", material="metal", region="si", yl=0, yh=0, xl=0, xh=case.w_e * UM, bloat=1e-10)
@@ -104,11 +117,15 @@ def build(case: HBTCase, material=None, pre_setup=None, extra_charge=None, x_lin
         if case.extra_recombination:
             parts.append(f"-({case.extra_recombination})")
         gen = " + ".join(parts)
+    if circuit:
+        from devsim import circuit_element
+        for k, c in (("VE", "emitter"), ("VB", "base"), ("VC", "collector")):
+            circuit_element(name=k, n1=f"{c}_bias", n2="0", value=0.0)
     phys = Physics(T=case.T, ge=ge_profile(case), tau_n=case.tau, tau_p=case.tau,
                    incomplete_ionization=case.cryo, fermi_dirac=case.cryo,
                    mobility="klaassen" if case.cryo else "masetti", initial_guess=case.initial_guess,
                    extended_precision=case.extended_precision)
-    return setup_region("d", "si", mat, net, tot, phys, {"emitter": False, "base": False, "collector": False},
+    return setup_region("d", "si", mat, net, tot, phys, {"emitter": circuit, "base": circuit, "collector": circuit},
                         extra_generation=gen, extra_charge=extra_charge)
 
 
