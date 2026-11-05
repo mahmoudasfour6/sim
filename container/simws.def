@@ -19,14 +19,22 @@ From: condaforge/miniforge3:24.9.2-0
 
 %post
     set -e
-    apt-get update && apt-get install -y --no-install-recommends build-essential gfortran git && rm -rf /var/lib/apt/lists/*
+    # no apt-get: every env comes from conda-forge locks (binary packages), so the build also works unprivileged
     cd /opt/sim_workspace
-    /opt/conda/bin/python tools/container_envs.py --envs-dir envs --prefix /opt/conda/envs
+    /opt/conda/bin/python tools/container_envs.py --envs-dir envs --prefix /opt/conda/envs \
+        --only workflow,tcad,materials,process_rad,quantum_iii_v,fenicsx
     /opt/conda/bin/conda clean -afy
     sed -i 's#^envs_root:.*#envs_root: /opt/conda/envs#' config/config.yaml
     echo "simws container built $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /opt/sim_workspace/CONTAINER_BUILD
 
 %environment
+    # the image must not see the host's settings (Apptainer passes the host environment through by default; the
+    # checks also run with --cleanenv): DEVSIM's BLAS from the image's own tcad env, no host ~/.local site-packages
+    unset DEVSIM_MATH_LIBS CONDA_PREFIX CONDA_DEFAULT_ENV PYTHONHOME
+    for f in /opt/conda/envs/tcad/lib/libopenblas.so.0 /opt/conda/envs/tcad/lib/libmkl_rt.so.2; do
+        if [ -e "$f" ]; then export DEVSIM_MATH_LIBS="$f"; break; fi
+    done
+    export PYTHONNOUSERSITE=1
     export SIMWS_ROOT=/opt/sim_workspace
     export PATH=/opt/conda/envs/workflow/bin:/opt/conda/bin:$PATH
     export OMP_NUM_THREADS=1
@@ -36,8 +44,10 @@ From: condaforge/miniforge3:24.9.2-0
     exec "$@"
 
 %test
+    set -e
     cd /opt/sim_workspace
-    /opt/conda/envs/tcad/bin/python -c "import devsim, skfem, simws; print('simws', simws.__version__)"
+    # numpy before devsim (a bare `import devsim` first segfaults, as on the host; simws.tcad imports numpy first)
+    /opt/conda/envs/tcad/bin/python -c "import numpy, devsim, skfem, simws; print('simws', simws.__version__, 'devsim ok')"
     PYTHONPATH=. /opt/conda/envs/tcad/bin/python -m pytest -q -p no:cacheprovider -o addopts= tests/unit -x -k "hub_core"
 
 %labels

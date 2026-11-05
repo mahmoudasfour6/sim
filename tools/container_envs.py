@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,27 @@ from pathlib import Path
 
 def norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def normalise_lock(lock: Path) -> Path:
+    """Explicit locks written by newer conda use 'URL md5=HASH' and percent-encoded epochs ('1%21164'); older conda
+    reads only 'URL#HASH'. Write that form next to the lock (the packages and hashes are unchanged)."""
+    from urllib.parse import unquote
+    out = []
+    for line in lock.read_text().splitlines():
+        t = line.strip()
+        if t.startswith("http"):
+            parts = t.split()
+            url = parts[0]
+            md5 = next((p.split("=", 1)[1] for p in parts[1:] if p.startswith("md5=")), None)
+            if "#" in url:
+                url, md5 = url.split("#", 1)
+            head, name = url.rsplit("/", 1)
+            line = f"{head}/{unquote(name)}" + (f"#{md5}" if md5 else "")
+        out.append(line)
+    fixed = lock.with_suffix(".normalised.txt")
+    fixed.write_text("\n".join(out) + "\n")
+    return fixed
 
 
 def main():
@@ -35,9 +57,22 @@ def main():
             continue
         pre = Path(a.prefix) / env
         print(f"== {env}", flush=True)
-        subprocess.run([a.conda, "create", "-y", "--prefix", str(pre), "--file", str(lock)], check=True)
+        fixed = normalise_lock(lock)
+        try:
+            subprocess.run([a.conda, "create", "-y", "--prefix", str(pre), "--file", str(fixed)], check=True)
+        except subprocess.CalledProcessError:
+            free = shutil.disk_usage(a.prefix).free / 2 ** 30
+            if free < 3.0:
+                # errno 28: updating conda cannot help, and the retry only buries the real error
+                raise SystemExit(f"   conda create for {env} failed with {free:.1f} GB free in the build: out of disk "
+                                 f"space (see the free-space preflight in tools/container_check.sh)")
+            # an older conda than the one that wrote the lock: update conda in base once, then retry
+            print("   conda create failed: updating conda in the base env and retrying", flush=True)
+            subprocess.run([a.conda, "install", "-y", "-n", "base", "-c", "conda-forge", "conda"], check=True)
+            subprocess.run([a.conda, "create", "-y", "--prefix", str(pre), "--file", str(fixed)], check=True)
         pipf = Path(a.envs_dir) / f"{env}.pip.txt"
         if not pipf.is_file():
+            _clean(a.conda, env)
             continue
         listed = subprocess.run([a.conda, "list", "--prefix", str(pre), "--json"], check=True, capture_output=True,
                                 text=True).stdout
@@ -53,9 +88,31 @@ def main():
                 continue
             if norm(m.group(1)) not in have:
                 todo.append(line)
+        missing = []
         if todo:
-            subprocess.run([str(pre / "bin" / "python"), "-m", "pip", "install", "--no-deps", *todo], check=True)
-        print(f"   pip-only: {len(todo)} installed, {len(skipped)} skipped (editable/URL): {skipped[:5]}")
+            pip = [str(pre / "bin" / "python"), "-m", "pip", "install", "--no-deps", "--no-cache-dir"]
+            # local-version wheels such as torch==2.15.0+cpu live on the PyTorch CPU index, not on PyPI
+            if any("+cpu" in t for t in todo):
+                pip += ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
+            if subprocess.run(pip + todo).returncode != 0:
+                # one bad pin must not sink the image: install one by one and record what could not be installed
+                for t in todo:
+                    if subprocess.run(pip + [t], capture_output=True).returncode != 0:
+                        missing.append(t)
+        if missing:
+            with open(Path(a.envs_dir).parent / "CONTAINER_MISSING.txt", "a") as fh:
+                fh.write(f"{env}: " + " ".join(missing) + "\n")
+            print(f"   NOT INSTALLED in {env}: {missing}")
+        print(f"   pip-only: {len(todo) - len(missing)} installed, {len(missing)} failed, {len(skipped)} skipped "
+              f"(editable/URL): {skipped[:5]}")
+        _clean(a.conda, env)
+
+
+def _clean(conda, env):
+    """Empty the package cache after each env: otherwise the downloaded archives and their extracted copies of every
+    env pile up in /opt/conda/pkgs on top of the envs themselves (about doubling the build's disk use)."""
+    subprocess.run([conda, "clean", "-afy"], stdout=subprocess.DEVNULL, check=False)
+    print(f"   {env} done; {shutil.disk_usage('/').free / 2 ** 30:.1f} GB free in the build", flush=True)
 
 
 if __name__ == "__main__":
