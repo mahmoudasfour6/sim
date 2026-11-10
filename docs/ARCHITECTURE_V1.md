@@ -478,3 +478,21 @@ disagree, A2 wins.
    stored measurement comparison without a `measurement_label` key (written before A2) counts as unlabelled: it
    does not validate. `independent` is set only by `compare_results`; `compare()` on bare quantities always leaves
    it False, measured or not.
+
+### A3 (10 Nov 2026, lead, before the first engine pair is run through the hub)
+
+1. **Magnitude floor in `compare` (6.3).** `compare(..., floor: Optional[float] = None)`, also accepted by
+   `compare_results` and `Study.compare_engines` (they pass it through). `floor` is a magnitude in a's unit and must
+   be > 0 (`ValueError` otherwise). A point is compared only when the reference value there, |b| after conversion to
+   a's unit and after interpolation onto a's axis, is strictly greater than `floor`; the other points are left out
+   exactly like points outside the window: they do not count in `n_points`, they cannot be the worst point, and
+   they do not make the comparison fail. Two scalars with |b| <= floor give `n_points == 0`, `worst is None`,
+   inconclusive. `Comparison` gains `floor: Optional[float] = None` (the value used) and `n_below_floor: int = 0`
+   (how many points inside the range and window were left out by the floor). With `floor=None` nothing changes.
+   Reason: this is the rule of the 0.9a Charon cross-check (currents are compared only where |J| > 1e-6 A/cm^2):
+   below a solver's noise floor a relative difference means nothing.
+2. **Pilot gate, fixed before the run.** `tools/v1_pilot_hub.py` runs the Charon-compatible pn diode of
+   `tools/v1_charon_check.py` on `device.devsim` and `device.charon` through the hub and compares `dc.I.anode`
+   (DEVSIM against Charon as reference) with metric "relative", tolerance 0.02 and floor 1e-2 A/m**2
+   (= 1e-6 A/cm^2): the 0.9a gate, unchanged. Declared before the hub run; the same pair outside the hub gave a
+   worst difference of 6.8e-4 on 10 Nov, so this run is a test of the hub path, not a new physics result.

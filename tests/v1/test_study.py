@@ -134,3 +134,22 @@ def test_compare_engine_with_itself_verifies_nothing(hub):
         assert t.level == "unverified"
         assert f"same-engine or sketch comparison with {rid} (consistency only: not verification)" in t.reasons, \
             t.reasons
+
+
+def test_a3_1_compare_engines_passes_floor(hub):
+    """A3.1: Study.compare_engines passes floor through to compare_results. Floors derived from the stored currents
+    (in a's unit): below both |I| -> both points; between them -> one; above both -> none (inconclusive)."""
+    import math
+
+    from simws.study import Study
+    res = Study(hub, _base(), engines=["devsim"]).sweep({"models.temperature_K": [300.0]})
+    ((_, q),) = res.quantity("dc.I.anode", engine="devsim")
+    mags = sorted(abs(v) for v in q.value)
+    assert len(mags) == 2 and 0.0 < mags[0] < mags[1]
+    for floor, n_kept in ((mags[0] / 2, 2), (math.sqrt(mags[0] * mags[1]), 1), (mags[1] * 2, 0)):
+        (c,) = res.compare_engines("dc.I.anode", "devsim", "devsim", tolerance=1e-12, record=False, floor=floor)
+        assert c.floor == floor and c.n_points == n_kept and c.n_below_floor == 2 - n_kept
+        if n_kept:
+            assert c.passed and c.worst <= 1e-12
+        else:
+            assert c.worst is None and c.inconclusive is True and c.passed is False

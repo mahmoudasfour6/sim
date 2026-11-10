@@ -34,6 +34,8 @@ class Comparison(BaseModel):
     note: str = ""
     # amendment A2
     interpolation: Literal["linear", "log", "none"] = "none"       # the method actually used
+    floor: Optional[float] = None                                  # A3.1: magnitude floor used (a's unit)
+    n_below_floor: int = 0                                         # points left out by the floor
     measurement_label: Optional[Literal["calibration", "validation"]] = None
     engine_a: str = ""
     engine_b: str = ""
@@ -66,7 +68,10 @@ def _metric(a: np.ndarray, b: np.ndarray, metric: str) -> np.ndarray:
 
 def compare(qa: Quantity, qb: Quantity, tolerance: float, metric: str = "relative",
             window: Optional[Tuple[float, float]] = None, min_points: int = 1,
-            interpolation: str = "auto") -> Comparison:
+            interpolation: str = "auto", floor: Optional[float] = None) -> Comparison:
+    if floor is not None and not floor > 0:
+        raise ValueError(f"floor must be > 0, got {floor!r}")
+    n_below = 0
     if metric not in ("relative", "ratio"):
         raise ValueError(f"metric must be 'relative' or 'ratio', got {metric!r}")
     if interpolation not in ("auto", "linear", "log"):
@@ -85,6 +90,8 @@ def compare(qa: Quantity, qb: Quantity, tolerance: float, metric: str = "relativ
         vb = np.atleast_1d(yb).astype(float)
         if va.size != 1 or vb.size != 1:
             raise ValueError("quantities without an axis must be scalars")
+        if floor is not None and not abs(vb[0]) > floor:          # A3.1: reference below the floor
+            va, vb, n_below = va[:0], vb[:0], 1
         w = _metric(va, vb, metric)
         pa, pb, xs = va, vb, np.array([math.nan])
         worst_at = None
@@ -117,6 +124,10 @@ def compare(qa: Quantity, qb: Quantity, tolerance: float, metric: str = "relativ
             pb = np.sign(yb[0]) * np.exp(np.interp(xs, xb, np.log(np.abs(yb)))) if len(xs) else np.array([])
         else:
             pb = np.interp(xs, xb, yb) if len(xs) else np.array([])
+        if floor is not None and len(pb):                         # A3.1: compare only where |reference| > floor
+            keep = np.abs(pb) > floor
+            n_below = int(np.sum(~keep))
+            xs, pa, pb = xs[keep], pa[keep], pb[keep]
         mask_w = _metric(pa, pb, metric)
         worst_at = None
 
@@ -135,7 +146,8 @@ def compare(qa: Quantity, qb: Quantity, tolerance: float, metric: str = "relativ
                       worst=worst, worst_at=worst_at, n_points=n,
                       window=None if window is None else (float(window[0]), float(window[1])),
                       passed=bool(passed), inconclusive=bool(inconclusive), note=note,
-                      interpolation=used, measurement_label=label)      # independent: set by compare_results
+                      interpolation=used, measurement_label=label,      # independent: set by compare_results
+                      floor=None if floor is None else float(floor), n_below_floor=n_below)
 
 
 def compare_results(hub, rid_a: str, name_a: str, rid_b: str, name_b: Optional[str] = None, **kw) -> Comparison:

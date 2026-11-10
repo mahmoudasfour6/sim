@@ -416,3 +416,195 @@ def test_a2_new_fields_stored_by_record(hub, fake_adapters):
     (rec,) = records_for(hub, ra.id)
     assert rec["independent"] is True and rec["engine_a"] == "fake_alpha" and rec["engine_b"] == "fake_beta"
     assert rec["interpolation"] == "log" and rec["measurement_label"] is None
+
+
+# ================================================================================================ amendment A3
+# ------------------------------------------------------------------------------------------------ A3.1 magnitude floor
+# Shared case: a and b on x = 0..4. b crosses the floor 1.0: |b| = 0.5 (below), 1.0 (EQUAL: must be left out,
+# "strictly greater"), then 2, 4, 8 (kept). The left-out points carry the largest differences (x = 0: |5/0.5 - 1| = 9,
+# x = 1: |3/1 - 1| = 2), so a floor that is ignored, or applied with ">=", gives a different worst and n_points.
+FX = [0.0, 1.0, 2.0, 3.0, 4.0]
+FA = [5.0, 3.0, 2.2, 4.2, 8.4]
+FB = [0.5, 1.0, 2.0, 4.0, 8.0]
+
+
+def _rel_kept(xs, avals, bref, floor, window=None):
+    """Expected values written out: relative difference at every point with |b| > floor (and inside window)."""
+    kept, below = {}, 0
+    for x, av, bv in zip(xs, avals, bref):
+        if window is not None and not (window[0] <= x <= window[1]):
+            continue
+        if abs(bv) > floor:
+            kept[x] = abs(av / bv - 1.0)
+        else:
+            below += 1
+    return kept, below
+
+
+@pytest.mark.parametrize("bad", [0.0, 0, -1.0, -1e-30])
+def test_a3_1_floor_must_be_positive(bad):
+    a = Q(FA, unit="A", axis=("x", FX, "V"))
+    b = Q(FB, unit="A", axis=("x", FX, "V"))
+    with pytest.raises(ValueError):
+        _cmp(a, b, tolerance=1.0, floor=bad)
+    with pytest.raises(ValueError):
+        _cmp(Q(1.0), Q(2.0), tolerance=1.0, floor=bad)
+
+
+def test_a3_1_floor_on_axis_leaves_points_out():
+    a = Q(FA, unit="A", axis=("x", FX, "V"))
+    b = Q(FB, unit="A", axis=("x", FX, "V"))
+    kept, below = _rel_kept(FX, FA, FB, 1.0)
+    assert sorted(kept) == [2.0, 3.0, 4.0] and below == 2                  # the x = 1 point (|b| == floor) is out
+    exp_at = max(kept, key=kept.get)
+    no_floor = _cmp(a, b, tolerance=0.2, interpolation="linear")
+    all_pts, _ = _rel_kept(FX, FA, FB, -1.0)
+    assert no_floor.n_points == 5 and no_floor.worst == pytest.approx(max(all_pts.values()), rel=1e-12)
+    assert no_floor.worst_at == pytest.approx(0.0) and no_floor.passed is False          # fails without the floor
+    c = _cmp(a, b, tolerance=0.2, interpolation="linear", floor=1.0)
+    assert c.n_points == 3 and c.n_below_floor == 2 and c.floor == 1.0
+    assert c.worst == pytest.approx(kept[exp_at], rel=1e-12) and c.worst_at == pytest.approx(exp_at)
+    assert c.worst <= 0.2 and c.passed is True and c.inconclusive is False                 # passes with it
+
+
+def test_a3_1_floor_left_out_points_do_not_fail_comparison():
+    """Left-out points "do not make the comparison fail" even with the ratio metric (sign change -> infinity)."""
+    a = Q([-1.0, 2.1], unit="A", axis=("x", [0.0, 1.0], "V"))
+    b = Q([0.5, 2.0], unit="A", axis=("x", [0.0, 1.0], "V"))
+    assert _cmp(a, b, tolerance=1.2, metric="ratio", interpolation="linear").worst == math.inf
+    c = _cmp(a, b, tolerance=1.2, metric="ratio", interpolation="linear", floor=1.0)
+    assert c.n_points == 1 and c.n_below_floor == 1 and c.worst_at == pytest.approx(1.0)
+    assert c.worst == pytest.approx(max(2.1 / 2.0, 2.0 / 2.1), rel=1e-12) and c.passed is True
+
+
+def test_a3_1_floor_in_a_unit_after_conversion():
+    """b in mA, a and floor in A: the floor is compared with b converted to A (raw mA values are all > 1.5)."""
+    b_mA = [500.0, 1200.0, 2000.0, 4000.0, 8000.0]
+    b_A = [v * 1e-3 for v in b_mA]
+    a = Q(FA, unit="A", axis=("x", FX, "V"))
+    b = Q(b_mA, unit="mA", axis=("x", FX, "V"))
+    kept, below = _rel_kept(FX, FA, b_A, 1.5)
+    assert below == 2 and min(b_mA) > 1.5                                 # the test distinguishes the two orders
+    exp_at = max(kept, key=kept.get)
+    c = _cmp(a, b, tolerance=0.2, interpolation="linear", floor=1.5)
+    assert c.n_points == 3 and c.n_below_floor == 2 and c.floor == 1.5
+    assert c.worst == pytest.approx(kept[exp_at], rel=1e-9) and c.worst_at == pytest.approx(exp_at)
+    assert c.passed is True
+
+
+def test_a3_1_floor_after_interpolation_onto_a_axis():
+    """a on a finer axis than b; the floor is tested on b interpolated onto a's points (0.5, 1.5, 2.5, 3.5, 4.5).
+    a's point at x = 5 lies outside b's range: never compared and not counted in n_below_floor."""
+    import numpy as np
+    bx, bv = [0.0, 2.0, 4.0], [0.5, 2.5, 4.5]
+    ax = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    av = [9.0, 6.0, 2.6, 3.6, 4.6, 100.0]
+    a = Q(av, unit="A", axis=("x", ax, "V"))
+    b = Q(bv, unit="A", axis=("x", bx, "V"))
+    inside = [x for x in ax if bx[0] <= x <= bx[-1]]
+    bref = list(np.interp(inside, bx, bv))
+    for floor, n_kept in ((1.6, 3), (1.2, 4)):        # 1.2: x = 1 (interp 1.5) is kept although b(0) = 0.5 < 1.2
+        kept, below = _rel_kept(inside, av, bref, floor)
+        assert len(kept) == n_kept and below == len(inside) - n_kept
+        exp_at = max(kept, key=kept.get)
+        c = _cmp(a, b, tolerance=10.0, interpolation="linear", floor=floor)
+        assert c.n_points == n_kept and c.n_below_floor == below
+        assert c.worst == pytest.approx(kept[exp_at], rel=1e-12) and c.worst_at == pytest.approx(exp_at)
+
+
+def test_a3_1_floor_with_window_counts_only_inside():
+    a = Q(FA, unit="A", axis=("x", FX, "V"))
+    b = Q(FB, unit="A", axis=("x", FX, "V"))
+    w = (1.0, 3.0)                                                          # x = 1, 2, 3; x = 0 is out of window
+    kept, below = _rel_kept(FX, FA, FB, 1.0, window=w)
+    assert below == 1 and sorted(kept) == [2.0, 3.0]
+    exp_at = max(kept, key=kept.get)
+    c = _cmp(a, b, tolerance=0.2, interpolation="linear", floor=1.0, window=w)
+    assert c.n_points == 2 and c.n_below_floor == 1
+    assert c.worst == pytest.approx(kept[exp_at], rel=1e-12) and c.worst_at == pytest.approx(exp_at)
+    # window that excludes every below-floor point
+    c2 = _cmp(a, b, tolerance=0.2, interpolation="linear", floor=1.0, window=(2.0, 4.0))
+    assert c2.n_points == 3 and c2.n_below_floor == 0
+
+
+def test_a3_1_floor_uses_magnitude_of_negative_reference():
+    signs = [-1.0, 1.0, -1.0, 1.0, -1.0]
+    av = [s * v for s, v in zip(signs, FA)]
+    bv = [s * v for s, v in zip(signs, FB)]
+    a = Q(av, unit="A", axis=("x", FX, "V"))
+    b = Q(bv, unit="A", axis=("x", FX, "V"))
+    kept, below = _rel_kept(FX, av, bv, 1.0)
+    assert below == 2
+    exp_at = max(kept, key=kept.get)
+    c = _cmp(a, b, tolerance=0.2, interpolation="linear", floor=1.0)
+    assert c.n_points == 3 and c.n_below_floor == 2
+    assert c.worst == pytest.approx(kept[exp_at], rel=1e-12) and c.worst_at == pytest.approx(exp_at) and c.passed
+    # all negative: a signed test (b > floor) would leave every point out
+    an, bn = [-v for v in FA], [-v for v in FB]
+    c2 = _cmp(Q(an, unit="A", axis=("x", FX, "V")), Q(bn, unit="A", axis=("x", FX, "V")), tolerance=0.2,
+              interpolation="linear", floor=1.0)
+    assert c2.n_points == 3 and c2.n_below_floor == 2 and c2.passed
+
+
+@pytest.mark.parametrize("bval", [0.5, 1.0, -0.5, -1.0, 0.0])
+def test_a3_1_scalars_at_or_below_floor(bval):
+    c = _cmp(Q(5.0), Q(bval), tolerance=100.0, floor=1.0)
+    assert c.n_points == 0 and c.worst is None and c.worst_at is None
+    assert c.inconclusive is True and c.passed is False and c.floor == 1.0
+
+
+@pytest.mark.parametrize("bval", [2.0, -2.0])
+def test_a3_1_scalars_above_floor_compared_normally(bval):
+    av = 1.1 if bval > 0 else -1.1
+    c = _cmp(Q(av), Q(bval), tolerance=0.5, floor=1.0)
+    plain = _cmp(Q(av), Q(bval), tolerance=0.5)
+    assert c.n_points == 1 and c.n_below_floor == 0 and c.floor == 1.0
+    assert c.worst == pytest.approx(abs(av / bval - 1.0), rel=1e-12) and c.worst == plain.worst
+    assert c.passed is True and c.inconclusive is False
+
+
+def test_a3_1_scalar_floor_in_a_unit():
+    # b = 500 mA = 0.5 A <= floor 1 A (raw 500 > 1): left out
+    c = _cmp(Q(5.0, unit="A"), Q(500.0, unit="mA"), tolerance=100.0, floor=1.0)
+    assert c.n_points == 0 and c.inconclusive is True
+    c2 = _cmp(Q(5.0, unit="A"), Q(2000.0, unit="mA"), tolerance=2.0, floor=1.0)
+    assert c2.n_points == 1 and c2.worst == pytest.approx(abs(5.0 / 2.0 - 1.0), rel=1e-12)
+
+
+def test_a3_1_floor_none_changes_nothing():
+    from simws.compare import Comparison
+    f = Comparison.model_fields
+    assert f["floor"].default is None and f["n_below_floor"].default == 0
+    import inspect
+    from simws.compare import compare
+    assert inspect.signature(compare).parameters["floor"].default is None
+    a = Q(FA, unit="A", axis=("x", FX, "V"))
+    b = Q(FB, unit="A", axis=("x", FX, "V"))
+    for kw in ({}, {"interpolation": "linear"}, {"window": (1.0, 3.0)}, {"metric": "ratio"}):
+        c0 = _cmp(a, b, tolerance=0.2, **kw)
+        c1 = _cmp(a, b, tolerance=0.2, floor=None, **kw)
+        assert c1.floor is None and c1.n_below_floor == 0
+        assert c1.model_dump() == c0.model_dump()
+    s0, s1 = _cmp(Q(5.0), Q(0.5), tolerance=0.2), _cmp(Q(5.0), Q(0.5), tolerance=0.2, floor=None)
+    assert s1.model_dump() == s0.model_dump() and s1.n_points == 1 and s1.floor is None
+
+
+def test_a3_1_compare_results_passes_floor(hub):
+    from simws import measured
+    from simws.compare import compare_results, record, records_for
+    src = {"source": "test fixture, not a measurement (tests/v1/test_compare.py)"}
+    ra = measured.ingest(hub, "a3_a", ("x", FX, "V"), {"y": (FA, "A")}, src)
+    rb = measured.ingest(hub, "a3_b", ("x", FX, "V"), {"y": ([v * 1e3 for v in FB], "mA")}, src)
+    kept, below = _rel_kept(FX, FA, FB, 1.0)
+    exp_at = max(kept, key=kept.get)
+    c0 = compare_results(hub, ra.id, "y", rb.id, tolerance=0.2, interpolation="linear")
+    assert c0.n_points == 5 and c0.passed is False and c0.floor is None and c0.n_below_floor == 0
+    c = compare_results(hub, ra.id, "y", rb.id, tolerance=0.2, interpolation="linear", floor=1.0)
+    assert c.a == ra.id and c.b == rb.id
+    assert c.floor == 1.0 and c.n_points == 3 and c.n_below_floor == below == 2
+    assert c.worst == pytest.approx(kept[exp_at], rel=1e-9) and c.worst_at == pytest.approx(exp_at) and c.passed
+    with pytest.raises(ValueError):
+        compare_results(hub, ra.id, "y", rb.id, tolerance=0.2, floor=0.0)
+    record(hub, c)
+    (rec,) = records_for(hub, ra.id)
+    assert rec["floor"] == 1.0 and rec["n_below_floor"] == 2
