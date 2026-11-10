@@ -29,6 +29,17 @@ CLASSES = {
 }
 
 
+# What each registry class was actually measured on. The spread between two codes on one reference problem is a
+# code-to-code number: it does not cover physics both codes share, and it is borrowed whenever the result is a
+# different device or temperature. attach() says so in the flags, so nobody reads it as a full model-form bound.
+REFERENCE = {
+    "devsim.current": "1D Si pn diode at 300 K, constant mobility and lifetime (DEVSIM vs Solcore)",
+    "dft.a0": "bulk Si, PBE (Quantum ESPRESSO vs GPAW)", "dft.B0": "bulk Si, PBE (Quantum ESPRESSO vs GPAW)",
+    "dft.gap": "bulk Si, PBE (Quantum ESPRESSO vs GPAW)",
+    "thermal.T": "2D nonlinear heat conduction (scikit-fem vs FEniCSx)",
+}
+
+
 def _path(root) -> Path:
     return Path(root) / "model_form.json"
 
@@ -77,5 +88,10 @@ def attach(res, root) -> list:
         q.uncertainty.sigma = tot.tolist() if np.ndim(tot) else float(tot)
         used.append(cls)
     if used:
-        res.provenance["model_form"] = {c: reg[c] for c in sorted(set(used))}
+        res.provenance["model_form"] = {c: {**reg[c], "reference_problem": REFERENCE.get(c, "not recorded")}
+                                        for c in sorted(set(used))}
+        for c in sorted(set(used)):
+            f = f"model_form_code_to_code:{c} from {REFERENCE.get(c, 'an unrecorded reference problem')}"
+            if f not in res.flags:
+                res.flags.append(f)
     return sorted(set(used))

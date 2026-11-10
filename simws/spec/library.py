@@ -1,0 +1,84 @@
+"""Device library: the existing simws devices written as engine-neutral descriptions.
+
+Each function returns a Problem that describes the same structure, models and solver settings as a legacy
+engine-bound builder, so a translator can be checked against the legacy result:
+
+    pn_diode_1d()   <->  simws.validation.engine_pairs._devsim_diode   (the DEVSIM/Solcore pair problem)
+    npn_hbt_2d()    <->  simws.tcad.hbt.build / gummel                  (flagship A, non-cryogenic settings)
+"""
+from __future__ import annotations
+
+from typing import Optional, Sequence
+
+from simws.spec.schema import (Box, Contact, DCSweep, DeviceSpec, DopingTerm, Equilibrium, GradeTerm, MeshHints,
+                               ModelSpec, Numerics, Problem, Region, Track)
+
+
+def pn_diode_1d(NA_cm3: float = 1e17, ND_cm3: float = 1e16, junction_um: float = 1.0, length_um: float = 4.0,
+                mu_n: float = 1000.0, mu_p: float = 400.0, tau_s: float = 1e-7, T: float = 300.0,
+                nodes: int = 801, V: Optional[Sequence[float]] = None) -> Problem:
+    """Abrupt silicon pn diode, p side at x < junction_um with the anode at x = 0. Constant mobilities and
+    lifetimes, Boltzmann statistics, no band-gap narrowing, no Auger: the reference problem of the engine pairs."""
+    h = length_um / (nodes - 1)
+    dev = DeviceSpec(
+        name="pn_diode_1d", dimension=1,
+        regions=[Region(name="si", material="silicon", box=Box(x=(0.0, length_um)))],
+        contacts=[Contact(name="anode", region="si", side="x_min"),
+                  Contact(name="cathode", region="si", side="x_max")],
+        doping=[DopingTerm(species="acceptor", concentration_cm3=NA_cm3, box=Box(x=(None, junction_um)), label="p side"),
+                DopingTerm(species="donor", concentration_cm3=ND_cm3, box=Box(x=(junction_um, None)), label="n side")],
+        mesh=MeshHints(x_lines=[(0.0, h), (length_um, h)]),
+        description="abrupt Si pn diode, anode on the p side")
+    models = ModelSpec(temperature_K=T, mobility="constant", mu_n_cm2_Vs=mu_n, mu_p_cm2_Vs=mu_p, srh="constant",
+                       tau_n_s=tau_s, tau_p_s=tau_s, auger=False, band_gap_narrowing="off")
+    analysis = Equilibrium() if V is None else DCSweep(contact="anode", values_V=[float(v) for v in V], step_V=0.05)
+    return Problem(device=dev, models=models, analysis=analysis,
+                   numerics=Numerics(relative_error=1e-12, absolute_error=1e10, max_iterations=80))
+
+
+def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t_e: float = 0.03, w_b: float = 0.05,
+               N_E: float = 1e20, N_B: float = 2e18, N_C: float = 5e16, N_SC: float = 1e19, y_sc: float = 1.0,
+               x_xb: float = 0.7, y_xb: float = 0.1, x_bc: float = 0.9, ge_peak: float = 0.15, ge_start: float = 0.0,
+               tau_s: float = 1e-6, T: float = 300.0, mesh_scale: float = 1.0,
+               VBE: Optional[Sequence[float]] = None, VCB: float = 0.0) -> Problem:
+    """2D npn SiGe HBT (ge_peak = 0: the Si BJT twin); the geometry, doping and mesh of simws.tcad.hbt.HBTCase with
+    its default (non-cryogenic, eb_refine off) settings. y is depth from the top surface; the emitter and base
+    contacts are on top (y_min), the collector contact covers the bottom (y_max).
+
+    The Gummel analysis follows the legacy sweep: at each VBE the collector is ramped to VBE + VCB (0.1 V steps),
+    then the base to VBE (0.05 V steps); the emitter stays at 0 V."""
+    yb = t_e + w_b
+    doping = [
+        DopingTerm(species="donor", concentration_cm3=N_E, box=Box(x=(None, w_e), y=(None, t_e)), include_upper=True,
+                   label="emitter"),
+        DopingTerm(species="donor", concentration_cm3=N_C, box=Box(y=(yb, None)), include_upper=True, label="collector"),
+        DopingTerm(species="donor", concentration_cm3=N_SC, box=Box(y=(y_sc, None)), include_upper=True,
+                   label="subcollector"),
+        DopingTerm(species="acceptor", concentration_cm3=N_B, box=Box(y=(None, yb)), include_upper=True, label="base"),
+        DopingTerm(species="acceptor", concentration_cm3=1e20, box=Box(x=(x_xb, None), y=(None, y_xb)),
+                   include_upper=True, label="extrinsic base"),
+    ]
+    grading = []
+    if ge_peak > 0 or ge_start > 0:
+        grading = [GradeTerm(element="Ge", axis="y", start_um=t_e, stop_um=yb, x_start=ge_start, x_stop=ge_peak)]
+    x_lines = sorted({(0.0, 0.05), (w_e - 0.05, 0.02), (w_e, 0.01), (w_e + 0.05, 0.02), (x_xb, 0.02), (x_bc, 0.05),
+                      (width_um, 0.1)})
+    y_lines = [(0.0, 0.005), (t_e, 0.002), (yb, 0.002), (yb + 0.1, 0.01), (y_sc, 0.05), (depth_um, 0.1)]
+    dev = DeviceSpec(
+        name="npn_hbt_2d", dimension=2,
+        regions=[Region(name="si", material="silicon", box=Box(x=(0.0, width_um), y=(0.0, depth_um)))],
+        contacts=[Contact(name="emitter", region="si", side="y_min", span=(0.0, w_e)),
+                  Contact(name="base", region="si", side="y_min", span=(x_bc, width_um)),
+                  Contact(name="collector", region="si", side="y_max")],
+        doping=doping, grading=grading,
+        mesh=MeshHints(x_lines=x_lines, y_lines=y_lines, scale=mesh_scale),
+        description="2D npn SiGe HBT (legacy HBTCase layout)")
+    models = ModelSpec(temperature_K=T, mobility="masetti", srh="constant", tau_n_s=tau_s, tau_p_s=tau_s, auger=True,
+                       band_gap_narrowing="slotboom")
+    if VBE is None:
+        analysis = Equilibrium()
+    else:
+        analysis = DCSweep(contact="base", values_V=[float(v) for v in VBE], step_V=0.05,
+                           tracking=[Track(contact="collector", offset_V=float(VCB), step_V=0.1)])
+    return Problem(device=dev, models=models, analysis=analysis,
+                   numerics=Numerics(relative_error=1e-8, absolute_error=1e10, max_iterations=40))

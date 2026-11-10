@@ -1,0 +1,297 @@
+"""DEVSIM translator (architecture v1, section 4.4): Problem -> DEVSIM device -> EngineResult.
+
+The physics is the existing simws.tcad.physics (setup_region); this module only translates the description:
+mesh lines, doping / Ge node expressions, contacts, Physics fields, solver options and the bias ramps.
+Lengths in the description are micrometres; DEVSIM works in cm. Engine imports happen inside functions.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from simws.engines.base import Capability, EngineNotAvailable, EngineResult, Unsupported
+from simws.spec.schema import DCSweep, DopingTerm, GradeTerm, Problem
+
+UM = 1e-4                  # micrometre -> cm
+DEVICE, MESH = "d", "m"
+
+CAPABILITY = Capability(
+    engine="devsim", env="tcad",
+    description="DEVSIM drift-diffusion (simws.tcad.physics): 1D and 2D silicon, SiGe grading, Fermi-Dirac, "
+                "Masetti / Klaassen mobility, SRH, Auger, Slotboom, freeze-out, impact ionization",
+    in_process=True, dimensions=[1, 2], max_regions=1, materials=["silicon"], grading_elements=["Ge"],
+    contact_kinds=["ohmic"], statistics=["boltzmann", "fermi_dirac"], mobility=["constant", "masetti", "klaassen"],
+    velocity_saturation=[False, True], srh=["off", "constant", "scharfetter"], auger=[False, True],
+    band_gap_narrowing=["off", "slotboom"], incomplete_ionization=["off", "altermatt", "constant_energy"],
+    impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep"],
+    tested_temperature_K=(250.0, 400.0),
+    notes="2D contacts only on y_min / y_max (pad regions); one grading term; one region starting at the origin")
+
+# the Newton tolerance below which setup_region's equilibrium solve counts as nominal
+_NOMINAL_REL_TOL = 1e-8
+
+
+# ------------------------------------------------------------------------------------------ capability
+def unsupported(problem: Problem) -> List[str]:
+    out = CAPABILITY.unsupported(problem)
+    dev = problem.device
+    if dev.dimension == 2:
+        for c in dev.contacts:
+            if c.side not in ("y_min", "y_max"):
+                out.append(f"contacts: 2D DEVSIM contacts must be on y_min or y_max ('{c.name}' is on {c.side})")
+    for r in dev.regions:
+        ivs = [r.box.x] + ([r.box.y] if r.box.y is not None else [])
+        if any(iv[0] != 0 for iv in ivs):
+            out.append("regions: the region box must start at 0")
+            break
+    if len(dev.grading) > 1:
+        out.append(f"grading: {len(dev.grading)} grading terms; the DEVSIM translator takes one")
+    if dev.regions and not any(s.startswith("regions:") for s in out):
+        r = dev.regions[0]
+        for name, iv, lines in (("x", r.box.x, dev.mesh.x_lines),
+                                ("y", r.box.y, dev.mesh.y_lines)):
+            if iv is not None and lines and (abs(lines[0][0] - iv[0]) > 1e-12 or abs(lines[-1][0] - iv[1]) > 1e-12):
+                out.append(f"mesh: the {name} mesh lines must span the region from {iv[0]:g} to {iv[1]:g} um")
+    return out
+
+
+def available() -> bool:
+    """True when the devsim package can be found (cheap: nothing is imported)."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("devsim") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ------------------------------------------------------------------------------------------ expressions
+def _num(v: float) -> str:
+    return repr(float(v))
+
+
+def _axis_factor(c: str, lo: Optional[float], hi: Optional[float], include_upper: bool) -> List[str]:
+    f = []
+    if lo is not None:
+        f.append(f"step({c} - {_num(lo * UM)})")
+    if hi is not None:
+        f.append(f"step({_num(hi * UM)} - {c})" if include_upper else f"(1 - step({c} - {_num(hi * UM)}))")
+    return f
+
+
+def _term_expr(t: DopingTerm) -> str:
+    f = _axis_factor("x", t.box.x[0], t.box.x[1], t.include_upper)
+    if t.box.y is not None:
+        f += _axis_factor("y", t.box.y[0], t.box.y[1], t.include_upper)
+    return "*".join([_num(t.concentration_cm3)] + f)
+
+
+def doping_expressions(problem: Problem) -> Tuple[str, str]:
+    """(net, total) node expressions in cm^-3, with x, y in cm."""
+    don = [_term_expr(t) for t in problem.device.doping if t.species == "donor"]
+    acc = [_term_expr(t) for t in problem.device.doping if t.species == "acceptor"]
+    nd = "(" + " + ".join(don) + ")" if don else "(0)"
+    na = "(" + " + ".join(acc) + ")" if acc else "(0)"
+    return f"{nd} - {na}", f"{nd} + {na}"
+
+
+def grade_expression(g: GradeTerm) -> str:
+    c, c0, c1 = g.axis, g.start_um * UM, g.stop_um * UM
+    return (f"step({c} - {_num(c0)})*step({_num(c1)} - {c})*({_num(g.x_start)} + "
+            f"{_num(g.x_stop - g.x_start)}*({c} - {_num(c0)})/{_num(c1 - c0)})")
+
+
+def physics_from(problem: Problem):
+    """ModelSpec -> simws.tcad.physics.Physics (mapping table of section 4.4)."""
+    from simws.tcad.physics import Physics
+    m = problem.models
+    g = problem.device.grading[0] if problem.device.grading else None
+    return Physics(
+        T=m.temperature_K, fermi_dirac=m.statistics == "fermi_dirac",
+        mobility="klaassen" if m.mobility == "klaassen" else "masetti",
+        mu_n=m.mu_n_cm2_Vs if m.mobility == "constant" else None,
+        mu_p=m.mu_p_cm2_Vs if m.mobility == "constant" else None,
+        field_mobility=bool(m.velocity_saturation), srh=m.srh != "off",
+        tau_n=m.tau_n_s if m.srh == "constant" else None, tau_p=m.tau_p_s if m.srh == "constant" else None,
+        auger=bool(m.auger), bgn=m.band_gap_narrowing == "slotboom", impact=m.impact_ionization == "van_overstraeten",
+        incomplete_ionization=m.incomplete_ionization != "off",
+        ii_model="charon" if m.incomplete_ionization == "constant_energy" else "altermatt",
+        ii_N_crit=m.ii_critical_doping_cm3, ii_E_const=m.ii_energy_eV,
+        donor_species=m.donor_species, acceptor_species=m.acceptor_species,
+        extended_precision=m.extended_precision,
+        ge=grade_expression(g) if g else None, ge_mode=g.mode if g else "strained")
+
+
+# ------------------------------------------------------------------------------------------ mesh
+def _mesh_1d(problem: Problem, region) -> None:
+    from devsim import (add_1d_contact, add_1d_mesh_line, add_1d_region, create_1d_mesh, create_device,
+                        finalize_mesh)
+    dev, s = problem.device, problem.device.mesh.scale
+    lines = dev.mesh.x_lines
+    create_1d_mesh(mesh=MESH)
+    for i, (pos, h) in enumerate(lines):
+        tag = "a" if i == 0 else ("b" if i == len(lines) - 1 else None)
+        kw = {"tag": tag} if tag else {}
+        add_1d_mesh_line(mesh=MESH, pos=pos * UM, ps=h * s * UM, **kw)
+    for c in dev.contacts:
+        add_1d_contact(mesh=MESH, name=c.name, tag="a" if c.side == "x_min" else "b", material="metal")
+    add_1d_region(mesh=MESH, material="Si", region=region.name, tag1="a", tag2="b")
+    finalize_mesh(mesh=MESH)
+    create_device(mesh=MESH, device=DEVICE)
+
+
+def _mesh_2d(problem: Problem, region) -> None:
+    """The construction of simws.tcad.mixed_mode._mesh_2d (thin pad regions above and below carry the contacts)
+    with the spec's region name, and the contacts of simws.tcad.hbt.build."""
+    from devsim import (add_2d_contact, add_2d_mesh_line, add_2d_region, create_2d_mesh, create_device,
+                        finalize_mesh)
+    dev, s = problem.device, problem.device.mesh.scale
+    width, height = region.box.x[1], region.box.y[1]
+    create_2d_mesh(mesh=MESH)
+    for pos, ps in dev.mesh.x_lines:
+        add_2d_mesh_line(mesh=MESH, dir="x", pos=pos * UM, ps=ps * s * UM)
+    for pos, ps in dev.mesh.y_lines:
+        add_2d_mesh_line(mesh=MESH, dir="y", pos=pos * UM, ps=ps * s * UM)
+    add_2d_mesh_line(mesh=MESH, dir="y", pos=-1e-8, ps=1e-8)
+    add_2d_mesh_line(mesh=MESH, dir="y", pos=height * UM + 1e-8, ps=1e-8)
+    add_2d_region(mesh=MESH, material="Si", region=region.name, yl=0, yh=height * UM)
+    add_2d_region(mesh=MESH, material="Si", region="pad_t", yl=-1e-8, yh=0)
+    add_2d_region(mesh=MESH, material="Si", region="pad_b", yl=height * UM, yh=height * UM + 1e-8)
+    for c in dev.contacts:
+        y = 0 if c.side == "y_min" else height * UM
+        xl, xh = (0, width * UM) if c.span is None else (c.span[0] * UM, c.span[1] * UM)
+        add_2d_contact(mesh=MESH, name=c.name, material="metal", region=region.name, yl=y, yh=y, xl=xl, xh=xh,
+                       bloat=1e-10)
+    finalize_mesh(mesh=MESH)
+    create_device(mesh=MESH, device=DEVICE)
+
+
+# ------------------------------------------------------------------------------------------ helpers
+def _json(x: Any) -> Any:
+    """numpy values and tuples -> plain JSON values; non-finite floats become None."""
+    if isinstance(x, dict):
+        return {str(k): _json(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json(v) for v in x]
+    if isinstance(x, np.ndarray):
+        return _json(x.tolist())
+    if isinstance(x, (np.bool_, bool)):
+        return bool(x)
+    if isinstance(x, (np.integer, int)):
+        return int(x)
+    if isinstance(x, (np.floating, float)):
+        f = float(x)
+        return f if np.isfinite(f) else None
+    return x if x is None or isinstance(x, str) else str(x)
+
+
+def _no_convergence(e: BaseException) -> bool:
+    m = str(e).lower()
+    return "converge" in m or "stalled" in m
+
+
+def _load_devsim():
+    os.environ.setdefault("DEVSIM_QUIET", "1")
+    try:
+        import simws.tcad  # noqa: F401  (safe reset_devsim; library import order)
+        import devsim  # noqa: F401
+    except ImportError as e:
+        raise EngineNotAvailable(f"devsim is not installed on this machine ({e})") from e
+
+
+class _State:
+    """What a built device needs for later ramps."""
+
+    def __init__(self, problem: Problem, used: dict, region: str, opts: dict, flags: List[str]):
+        self.problem, self.used, self.region, self.opts, self.flags = problem, used, region, opts, flags
+        self.callback = None
+        if problem.models.mobility == "klaassen":
+            from simws.tcad.physics import relax_mobility
+            self.callback = lambda _v: relax_mobility(DEVICE, region, self.opts)
+
+    def ramp(self, contact: str, target: float, step: float):
+        from simws.tcad.solve import ramp_bias
+        return ramp_bias(DEVICE, contact, target, step=step, callback=self.callback,
+                         retry_callback=self.callback is not None, **self.opts)
+
+    def currents(self) -> Dict[str, float]:
+        from simws.tcad.physics import contact_current
+        return {c.name: float(contact_current(DEVICE, c.name)) for c in self.problem.device.contacts}
+
+
+def _build(problem: Problem) -> _State:
+    """Everything up to and including the equilibrium solve."""
+    from simws.hub.adapter import NotConverged
+    reasons = unsupported(problem)
+    if reasons:
+        raise Unsupported("devsim", reasons)
+    _load_devsim()
+    from devsim import reset_devsim
+    from simws.materials import load
+    from simws.tcad.physics import setup_region
+    dev = problem.device
+    region = dev.regions[0]
+    reset_devsim()
+    (_mesh_1d if dev.dimension == 1 else _mesh_2d)(problem, region)
+    net, tot = doping_expressions(problem)
+    phys = physics_from(problem)
+    num = problem.numerics
+    try:
+        used = setup_region(DEVICE, region.name, load(region.material), net, tot, phys,
+                            {c.name: False for c in dev.contacts})
+    except RuntimeError as e:
+        if _no_convergence(e):
+            raise NotConverged(f"equilibrium solve at 0 V: {e}") from e
+        raise
+    flags: List[str] = []
+    tol = num.relative_error
+    eq = used.get("equilibrium_rel_tol")
+    if eq is not None and eq > _NOMINAL_REL_TOL:          # cold-device fallback of setup_region (legacy cryogenic)
+        tol = max(num.relative_error, eq)
+        if tol > num.relative_error:
+            flags.append(f"newton_rel_tol:{tol:g}")
+    opts = dict(absolute_error=num.absolute_error, relative_error=tol, maximum_iterations=num.max_iterations)
+    return _State(problem, used, region.name, opts, flags)
+
+
+def build(problem: Problem) -> dict:
+    """Build the device in DEVSIM (device 'd', region = the spec's region name) and solve the equilibrium. Returns
+    the values setup_region used, so that later analyses (AC, strikes) can start from the built device."""
+    return _build(problem).used
+
+
+# ------------------------------------------------------------------------------------------ run
+def run(problem: Problem, workdir: Optional[Path] = None) -> EngineResult:
+    from simws.hub.adapter import NotConverged
+    st = _build(problem)
+    contacts = [c.name for c in problem.device.contacts]
+    an = problem.analysis
+    unit = "A/cm**2" if problem.device.dimension == 1 else "A/cm"
+    diag = {"used": _json(st.used), "solver_options": _json(st.opts), "n_contacts": len(contacts)}
+    if not isinstance(an, DCSweep):
+        i0 = st.currents()
+        return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="equilibrium",
+                            sweep_contact=None, sweep_V=[0.0], currents={k: [v] for k, v in i0.items()},
+                            current_unit=unit, flags=st.flags, diagnostics=_json(diag))
+    cur: Dict[str, List[float]] = {k: [] for k in contacts}
+    reached = 0.0
+    try:
+        for name, v in an.fixed_V.items():
+            st.ramp(name, v, 0.25)
+        for v in an.values_V:
+            for t in an.tracking:
+                st.ramp(t.contact, v + t.offset_V, t.step_V)
+            st.ramp(an.contact, v, an.step_V)
+            reached = v
+            for k, i in st.currents().items():
+                cur[k].append(i)
+    except RuntimeError as e:
+        if not _no_convergence(e):
+            raise
+        raise NotConverged(f"{an.contact} reached {reached:g} V of {list(an.values_V)} "
+                           f"({len(cur[contacts[0]])} points done): {e}") from e
+    return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="dc_sweep",
+                        sweep_contact=an.contact, sweep_V=[float(v) for v in an.values_V], currents=cur,
+                        current_unit=unit, flags=st.flags, diagnostics=_json(diag))

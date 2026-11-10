@@ -10,6 +10,8 @@ mkdir -p results/nightly
 {
   echo "== nightly $STAMP on $(hostname), commit $(git rev-parse --short HEAD)"
   echo "== fast tier";  $E/workflow/bin/pytest -q 2>&1 | tail -3;            fast=${PIPESTATUS[0]}
+  echo "== unit tier (tcad env: unit, connections, v1)"
+  PYTHONPATH=. $E/tcad/bin/python -m pytest -q -p no:cacheprovider -o addopts= -m "not slow" tests/unit tests/connections tests/v1 2>&1 | tail -5; unit=${PIPESTATUS[0]}
   echo "== slow tier";  $E/workflow/bin/pytest -m slow -q 2>&1 | tail -15;   slow=${PIPESTATUS[0]}
   CORES=$($E/workflow/bin/python -c "import yaml; print(yaml.safe_load(open('config/local_tuning.yaml'))['snakemake']['cores'])" 2>/dev/null || echo 4)
   MEM=$($E/workflow/bin/python -c "import yaml; print(yaml.safe_load(open('config/local_tuning.yaml'))['snakemake']['mem_mb'])" 2>/dev/null || echo 16000)
@@ -23,7 +25,7 @@ mkdir -p results/nightly
   if git remote | grep -qx offsite; then
     echo "== off-laptop backup"; git push -q offsite --all 2>&1 | tail -2; echo "  pushed $(git rev-parse --short HEAD)"
   fi
-  echo "== summary: fast=$fast slow=$slow workflow=$wf queue=${q:-0} (0 = pass)"
+  echo "== summary: fast=$fast unit=$unit slow=$slow workflow=$wf queue=${q:-0} (0 = pass)"
 } > "$LOG" 2>&1
 tail -1 "$LOG" > results/nightly/LATEST.txt
 cp "$LOG" "/mnt/c/Users/$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')/sim_backup/nightly_latest.log" 2>/dev/null || true
