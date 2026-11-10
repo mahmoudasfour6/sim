@@ -8,6 +8,8 @@ This script changes nothing in the store: it calls the engine modules directly.
 """
 from __future__ import annotations
 
+import contextlib
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +17,21 @@ from pathlib import Path
 import numpy as np
 
 GATE, J_FLOOR = 0.02, 1e-6          # simws.validation.charon_xcheck (fixed for 0.9a)
+
+
+@contextlib.contextmanager
+def _quiet():
+    """Silence stdout at the file-descriptor level (DEVSIM writes from C++)."""
+    sys.stdout.flush()
+    saved, null = os.dup(1), os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(null, 1)
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
+        os.close(null)
 
 
 def problem(T: float = 300.0):
@@ -41,8 +58,16 @@ def main(argv) -> int:
         for f in ch.prepare(p, work):
             print("  ", f)
         return 3
-    a = engines.module("devsim").run(p)
-    b = ch.run(p, work)
+    print("workdir:", work, flush=True)
+    with _quiet():                                   # DEVSIM prints every Newton iteration
+        a = engines.module("devsim").run(p)
+    print("devsim done; running Charon (decks, interpreter, charon_mp.exe) ...", flush=True)
+    try:
+        b = ch.run(p, work)
+    except Exception as exc:  # noqa: BLE001  first runs are expected to fail: show what is needed to fix it
+        print(f"CHARON SIDE FAILED: {type(exc).__name__}: {exc}")
+        print("files in the work folder:", sorted(f.name for f in work.iterdir()))
+        return 4
     Ja, Jb = np.array(a.currents["anode"]), np.array(b.currents["anode"])
     worst = 0.0
     for v, x, y in zip(a.sweep_V, Ja, Jb):

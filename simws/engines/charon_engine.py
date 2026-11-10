@@ -225,31 +225,75 @@ def prepare(problem: Problem, workdir) -> List[Path]:
 
 
 # ------------------------------------------------------------------------------------------------ execution
+_INTERP_CACHE: Dict[str, Path] = {}
+
+
+def _charon_root() -> Path:
+    """Where Charon lives: CHARON_ROOT, else the top folder of the configured executable (~/tcad/build/src/
+    charon_mp.exe -> ~/tcad), else ~/tcad. The same default as tools/run_charon_xcheck.sh."""
+    if os.environ.get("CHARON_ROOT"):
+        return Path(os.environ["CHARON_ROOT"]).expanduser()
+    exe = _config_exe()
+    home = Path.home()
+    if exe is not None:
+        try:
+            return home / exe.resolve().relative_to(home).parts[0]
+        except (ValueError, IndexError):
+            pass
+    return home / "tcad"
+
+
 def _interpreter() -> Path:
+    """charonInterpreter.py, found as tools/run_charon_xcheck.sh finds it: CHARON_INTERP, then PATH, then a search
+    under the Charon root (following links, skipping the parseGenerator copies)."""
     for cand in (os.environ.get("CHARON_INTERP"), shutil.which("charonInterpreter.py")):
-        if cand and Path(cand).is_file():
-            return Path(cand)
-    raise EngineNotAvailable("charonInterpreter.py not found (set CHARON_INTERP or put it on PATH)")
+        if cand and Path(cand).expanduser().is_file():
+            return Path(cand).expanduser()
+    root = _charon_root()
+    key = str(root)
+    if key not in _INTERP_CACHE:
+        for dirpath, _dirs, files in os.walk(root, followlinks=True):
+            if "charonInterpreter.py" in files and "parseGenerator" not in dirpath:
+                _INTERP_CACHE[key] = Path(dirpath) / "charonInterpreter.py"
+                break
+    if key in _INTERP_CACHE:
+        return _INTERP_CACHE[key]
+    raise EngineNotAvailable(f"charonInterpreter.py not found on PATH or under {root} (set CHARON_INTERP)")
+
+
+def _tail(text: str, n: int = 12) -> str:
+    return "\n".join((text or "").strip().splitlines()[-n:])
 
 
 def _execute(workdir: Path) -> None:
-    """Run every deck in runlist_all.txt as tools/run_charon_xcheck.sh does. UNTESTED here (no Charon)."""
+    """Run every deck in runlist_all.txt the way tools/run_charon_xcheck.sh does: the interpreter with this
+    Python (the tcad env), then charon_mp.exe under mpirun, with the env's bin folder first on PATH (what
+    `conda activate tcad` gives the shell script). Logs: <deck>.interp.log and <deck>.log in the work folder."""
+    import sys
     from simws.hub.adapter import NotConverged
     exe, interp = _config_exe(), _interpreter()
-    mpi = shutil.which("mpirun")
+    envbin = str(Path(sys.executable).parent)
+    env = dict(os.environ, PATH=envbin + os.pathsep + os.environ.get("PATH", ""))
+    mpi = shutil.which("mpirun", path=env["PATH"])
     for name in (workdir / "runlist_all.txt").read_text().split():
         inp = workdir / f"{name}.inp"
         src = inp.read_text().splitlines()[0].split()[3]
         if not (workdir / src).exists():
-            raise NotConverged(f"Charon deck {name} skipped: start file {src} missing (an earlier deck failed)")
-        r = subprocess.run(["python", str(interp), "-i", f"{name}.inp"], cwd=workdir, capture_output=True, text=True)
+            raise NotConverged(f"Charon deck {name} skipped: start file {src} is missing in {workdir} "
+                               f"(the mesh was not written, or an earlier deck failed)")
+        r = subprocess.run([sys.executable, str(interp), "-i", f"{name}.inp"], cwd=workdir, capture_output=True,
+                           text=True, env=env)
+        (workdir / f"{name}.interp.log").write_text((r.stdout or "") + (r.stderr or ""))
         if r.returncode:
-            raise NotConverged(f"Charon interpreter failed on {name}: {r.stderr[-300:]}")
+            raise NotConverged(f"Charon interpreter failed on {name} (log: {workdir / (name + '.interp.log')}):\n"
+                               + _tail((r.stdout or "") + (r.stderr or "")))
         cmd = ([mpi, "-np", "1"] if mpi else []) + [str(exe), f"--i={name}.inp.xml", "--current"]
-        r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+        r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True, env=env)
+        (workdir / f"{name}.log").write_text((r.stdout or "") + (r.stderr or ""))
         if r.returncode:
-            (workdir / f"{name}.exo").unlink(missing_ok=True)
-            raise NotConverged(f"Charon did not converge on {name} (bias reached: see earlier decks)")
+            (workdir / f"{name}.exo").unlink(missing_ok=True)       # an aborted run leaves a partial file
+            raise NotConverged(f"Charon failed on {name} (exit {r.returncode}; log: {workdir / (name + '.log')}):\n"
+                               + _tail((r.stdout or "") + (r.stderr or "")))
 
 
 def collect(problem: Problem, workdir) -> EngineResult:
