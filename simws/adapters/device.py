@@ -43,9 +43,17 @@ class DeviceAdapter(Adapter):
         out["problem"] = _problem(params).model_dump(mode="json")
         return out
 
+    @staticmethod
+    def _study(job) -> bool:
+        """A4.1: a mesh study runs at paper fidelity or when the job asks for it."""
+        return job.fidelity == "paper" or bool(job.key.params.get("mesh_study", False))
+
     def prepare(self, job, ctx) -> None:
         super().prepare(job, ctx)
         from simws import engines
+        if self._study(job) and not engines.module(self.ENGINE).CAPABILITY.mesh_study:      # A4.2
+            raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: {self.ENGINE} cannot refine its mesh "
+                               f"(so it cannot give paper-fidelity results)")
         reasons = engines.module(self.ENGINE).unsupported(_problem(job.key.params))
         if reasons:
             raise InvalidInput(f"unsupported by {self.ENGINE}: " + "; ".join(reasons))
@@ -55,34 +63,76 @@ class DeviceAdapter(Adapter):
         from simws.engines.base import EngineNotAvailable, Unsupported
         problem = _problem(job.key.params)
         mod = engines.module(self.ENGINE)
+        levels = None
         try:
-            res = mod.run(problem, ctx.staging)
+            if self._study(job):                             # A4.3: three meshes, coarse to fine
+                from simws.hub import mesh_study as MS
+                levels = [mod.run(problem.with_changes({"device.mesh.scale": sc}), ctx.staging)
+                          for sc in MS.scales(problem.device.mesh.scale)]
+                res = levels[-1]
+            else:
+                res = mod.run(problem, ctx.staging)
         except EngineNotAvailable as e:
             raise AdapterError(f"engine '{self.ENGINE}' is not installed on this machine: {e}") from e
         except Unsupported as e:
             raise InvalidInput(f"unsupported by {self.ENGINE}: " + "; ".join(e.reasons)) from e
-        return {"result": res, "problem": problem, "outside": mod.CAPABILITY.outside_tested_range(problem)}
+        return {"result": res, "problem": problem, "outside": mod.CAPABILITY.outside_tested_range(problem),
+                "levels": levels}
+
+    @staticmethod
+    def _residual(res, factor: float, floor: float) -> float:
+        I = np.array([np.atleast_1d(np.asarray(v, float)) * factor for v in res.currents.values()])
+        return float(np.max(np.abs(I.sum(axis=0)) / (np.abs(I).max(axis=0) + floor)))
 
     def collect(self, job, ctx, raw):
-        res, problem = raw["result"], raw["problem"]
+        res, problem, levels = raw["result"], raw["problem"], raw.get("levels")
         unit, factor = _UNITS[res.current_unit]
+        floor = _FLOOR[unit]
+        scalar = res.analysis == "equilibrium"
         ctx.flags += [f for f in res.flags if f not in ctx.flags]
         ctx.flags += ["extrapolated:" + s for s in raw["outside"]]
-        ctx.diagnostics.update({"problem_id": res.problem_id, "engine": res.engine, "device": problem.device.name,
-                                "temperature_K": problem.models.temperature_K, **res.diagnostics})
-        axes = ([] if res.analysis == "equilibrium" else
-                [{"name": f"V_{res.sweep_contact}", "unit": "V", "values": list(res.sweep_V)}])
+        ctx.diagnostics.update({"problem_id": problem.problem_id(), "engine": res.engine,
+                                "device": problem.device.name, "temperature_K": problem.models.temperature_K,
+                                **res.diagnostics})
+        axes = [] if scalar else [{"name": f"V_{res.sweep_contact}", "unit": "V", "values": list(res.sweep_V)}]
+        sig, per = {}, {}
+        if levels is not None:                               # A4.4: error bar per contact and sweep point
+            from simws.hub import mesh_study as MS
+            if any(list(L.sweep_V) != list(res.sweep_V) or set(L.currents) != set(res.currents) for L in levels):
+                raise AdapterError("mesh study: the three meshes did not return the same sweep")
+            for name in res.currents:
+                sig[name], per[f"dc.I.{name}"] = MS.series(
+                    [np.abs(np.asarray(L.currents[name], float)) * factor for L in levels], floor,
+                    None if scalar else res.sweep_V)
+
+        def _sigma(name):
+            if name not in sig:
+                return None
+            return float(sig[name][0]) if scalar else sig[name].tolist()
+
         qs = []
         for name, vals in res.currents.items():
             v = np.asarray(vals, float) * factor
-            qs.append(ctx.quantity(f"dc.I.{name}", float(v[0]) if res.analysis == "equilibrium" else v, unit,
-                                   axes=axes, conventions=CUR))
+            qs.append(ctx.quantity(f"dc.I.{name}", float(v[0]) if scalar else v, unit, axes=axes, conventions=CUR,
+                                   sigma=_sigma(name)))
         # the one output every problem has (amendment A1.8): how well the terminal currents sum to zero
-        I = np.array([np.atleast_1d(np.asarray(v, float)) * factor for v in res.currents.values()])
-        resid = float(np.max(np.abs(I.sum(axis=0)) / (np.abs(I).max(axis=0) + _FLOOR[unit])))
         # A2.4: when the engine derived a terminal current from the others, the residual is zero by construction
         derived = any(f.endswith("_current_from_kirchhoff") for f in res.flags)
-        qs.append(ctx.quantity(KIRCHHOFF, resid, "dimensionless", flags=["not_independent"] if derived else []))
+        rs = None
+        if levels is not None:                               # uniform interval over the three meshes
+            r3 = [self._residual(L, factor, floor) for L in levels]
+            rs = float((max(r3) - min(r3)) / (2 * 3 ** 0.5))
+        qs.append(ctx.quantity(KIRCHHOFF, self._residual(res, factor, floor), "dimensionless", sigma=rs,
+                               flags=["not_independent"] if derived else []))
+        if levels is not None:
+            for q in qs:
+                q.uncertainty.components["numerical"] = q.uncertainty.sigma
+            rec = MS.record(problem.device.mesh.scale, per)
+            ctx.verification["mesh"] = rec
+            ctx.diagnostics["mesh_scale_reported"] = rec["mesh_scales"][-1]
+            ctx.flags.append(MS.NUMERICAL_ONLY_FLAG)         # A4.5: mesh error only, nothing borrowed
+            if not rec["passed"]:
+                ctx.flags.append(MS.NOT_ASYMPTOTIC_FLAG)
         return qs
 
     def self_check(self, job, ctx, qs) -> List[str]:
@@ -102,15 +152,16 @@ class DeviceAdapter(Adapter):
 class DeviceDevsim(DeviceAdapter):
     ENGINE = "devsim"
     manifest = Manifest(
-        name="device.devsim", version="1.0", env="tcad", engine="devsim", engine_version="env-locked",
+        name="device.devsim", version="1.1", env="tcad", engine="devsim", engine_version="env-locked",
         description="Any simws.spec Problem (equilibrium or DC sweep) on the DEVSIM translator",
+        verification={"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"},
         inputs=["problem"], outputs=_OUTPUTS, native_conventions=CUR, citations=["devsim"])
 
 
 class DeviceCharon(DeviceAdapter):
     ENGINE = "charon"
     manifest = Manifest(
-        name="device.charon", version="1.0", env="tcad", engine="charon", engine_version="env-locked",
+        name="device.charon", version="1.1", env="tcad", engine="charon", engine_version="env-locked",
         description="Any simws.spec Problem the Charon translator supports (1D pn DC sweeps)",
         # no citation key yet: "charon" is not in simws.hub.citations, and a key that is not registered makes
         # citations.bibliography() raise. Add the checked reference there first, then cite it here.

@@ -18,7 +18,7 @@ def test_manifest(name, engine):
     from simws.hub import adapter as A
     m = A.manifest(name)
     assert m.name == name and m.env == "tcad" and m.engine == engine
-    assert m.version == "1.0" and m.engine_version == "env-locked"
+    assert m.version == "1.1" and m.engine_version == "env-locked"        # amended by the lead (contract A4.6)
     # amended by the lead (contract A1.8): one declared output, the Kirchhoff residual
     assert m.inputs == ["problem"] and [o.name for o in m.outputs] == ["dc.kirchhoff_residual"]
     assert m.native_conventions == {"terminal_current": "into_device+"}

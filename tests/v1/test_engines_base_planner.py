@@ -58,6 +58,7 @@ def test_capability_refuses_unknown_fields():
     with pytest.raises(pydantic.ValidationError):
         _cap(gpus=4)
     assert _cap().notes == ""
+    assert _cap().mesh_study is False                               # contract A4.2: the new field defaults to False
 
 
 # ------------------------------------------------------------------------------------------------ Capability.unsupported
@@ -182,6 +183,7 @@ def test_devsim_capability_exact():
     assert c.impact_ionization == ["off", "van_overstraeten"]
     assert c.analyses == ["equilibrium", "dc_sweep"]
     assert tuple(c.tested_temperature_K) == (250.0, 400.0)
+    assert c.mesh_study is True                                     # contract A4.2
 
 
 def test_charon_capability_exact():
@@ -195,6 +197,7 @@ def test_charon_capability_exact():
     assert c.band_gap_narrowing == ["off"] and c.incomplete_ionization == ["constant_energy"]
     assert c.impact_ionization == ["off"] and c.analyses == ["dc_sweep"]
     assert tuple(c.tested_temperature_K) == (77.0, 300.0)
+    assert c.mesh_study is False                                    # contract A4.2: Charon's meshes are fixed files
 
 
 def test_library_devices_supported_by_devsim():

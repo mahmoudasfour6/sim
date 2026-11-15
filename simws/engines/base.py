@@ -66,6 +66,7 @@ class Capability(BaseModel):
     impact_ionization: List[str]
     analyses: List[str]
     tested_temperature_K: Tuple[float, float]      # runs outside this range are flagged, not refused
+    mesh_study: bool = False                       # A4.2: can rerun a problem on refined meshes
     notes: str = ""
 
     def unsupported(self, problem: Problem) -> List[str]:

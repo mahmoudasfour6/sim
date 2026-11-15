@@ -27,7 +27,7 @@ CAPABILITY = Capability(
     velocity_saturation=[False, True], srh=["off", "constant", "scharfetter"], auger=[False, True],
     band_gap_narrowing=["off", "slotboom"], incomplete_ionization=["off", "altermatt", "constant_energy"],
     impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep"],
-    tested_temperature_K=(250.0, 400.0),
+    tested_temperature_K=(250.0, 400.0), mesh_study=True,
     notes="2D contacts only on y_min / y_max (pad regions); one grading term; one region starting at the origin")
 
 # the Newton tolerance below which setup_region's equilibrium solve counts as nominal

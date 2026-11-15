@@ -496,3 +496,69 @@ disagree, A2 wins.
    (DEVSIM against Charon as reference) with metric "relative", tolerance 0.02 and floor 1e-2 A/m**2
    (= 1e-6 A/cm^2): the 0.9a gate, unchanged. Declared before the hub run; the same pair outside the hub gave a
    worst difference of 6.8e-4 on 10 Nov, so this run is a test of the hub path, not a new physics result.
+
+### A4 (15 Nov 2026, lead): mesh error bars for the device adapters
+
+Lifts the limit recorded in A1.9. The rule is the one the legacy HBT adapter has used since 0.9a
+(`simws.adapters.tcad.HbtGummel._mesh_uncertainty`); nothing in the legacy code changes, and it is the reference.
+
+1. **When.** A `device.<engine>` job runs a mesh study when `job.fidelity == "paper"` or the job parameter
+   `mesh_study` is true (`hub.submit("device.devsim", params={"problem": ..., "mesh_study": True})`). Otherwise
+   nothing changes (one run, no uncertainty, A1.9 still describes the result).
+2. **Which engines.** `Capability` gains `mesh_study: bool = False`: True for DEVSIM, False for Charon (its meshes
+   are fixed files). A mesh study on an engine without it is refused before anything runs: status `invalid_input`,
+   message containing `"mesh_study: <engine> cannot refine its mesh"`. So `device.charon` cannot be paper fidelity.
+3. **Meshes.** Three runs of the same problem with `device.mesh.scale` = s0, s0/r, s0/r^2, r = sqrt(2), where s0 is
+   the scale in the description (coarse to fine; the same ratio and number of levels as the legacy adapter). The
+   reported values, the sweep axis and the engine flags are those of the finest run. A run that does not converge
+   on any level makes the job `not_converged`.
+4. **Error bar per point.** For every contact current and every sweep point, with |I| on the three meshes
+   (coarse to fine) as f3, f2, f1:
+   - `rec = simws.hub.verification.solution_from_values([0, 1, 2], [f3, f2, f1], ratio=r)`;
+   - the point is "good" when `rec["sigma_num"] == 0.0`, or when `rec["sigma_num"]` is not None and the observed
+     order p satisfies 0.5 <= p <= 4.0 and the asymptotic ratio satisfies 0.5 < ratio < 2.0; then
+     sigma = `rec["sigma_num"]`;
+   - otherwise sigma = 1.25 * |f1 - f2| / (r^0.5 - 1) / `simws.hub.uncertainty.GCI_COVERAGE_K` (the conservative
+     bound: an order no better than 0.5 assumed);
+   - exception, new in A4: when |f1| is below the adapter's noise floor (1e-8 A/m in 2D, 1e-4 A/m^2 in 1D), the
+     three values are solver noise: sigma = that floor, the point counts as neither good nor conservative, and the
+     record marks it `"below_floor": true`.
+   Each `dc.I.<contact>` quantity carries `uncertainty.kind == "sigma"`, sigma in the quantity's unit and of the
+   value's shape (a float for equilibrium), and `uncertainty.components == {"numerical": sigma}`.
+   `dc.kirchhoff_residual` is computed on each of the three meshes; its value is the finest mesh's and its sigma
+   is (max - min over the three meshes) / (2 * sqrt(3)) (a uniform interval), also as component "numerical".
+5. **Record.** `result.verification["mesh"]` =
+   `{"kind": "solution", "ratio": r, "levels": 3, "mesh_scales": [s0, s0/r, s0/r^2], "quantities": {name: [per
+   point ...]}, "passed": bool}` where each per-point entry has `axis_value` (the sweep value; None for
+   equilibrium), `values_coarse_to_fine` (|I| in the quantity's unit), `order`, `gci_fine`, `asymptotic_ratio`,
+   `conservative_bound` (bool), `below_floor` (bool) and `rel_sigma` (sigma / |f1|, None when f1 is 0).
+   `passed` is True when no point used the conservative bound. When it is False the result gets the flag
+   `"mesh_not_asymptotic: conservative mesh bound used for some points"`. Every mesh-study result gets the flag
+   `"budget:numerical_only"`: the error bar covers the mesh error and nothing else (no parameter or model-form
+   part), and no model-form number is borrowed for these quantities.
+6. **Manifest.** `device.devsim`: version "1.1" and
+   `verification={"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"}`, so the
+   gatekeeper requires the record at paper fidelity. `device.charon`: version "1.1", no verification entry.
+   (The version is part of the job key: results stored under 1.0 stay in the store, and a new submit runs again.)
+7. **Acceptance R5 (tolerances fixed here, before any run).** Problem `npn_hbt_2d(VBE=[0.6, 0.7])`.
+   New path: `device.devsim` with `mesh_study: True`, screening fidelity. Legacy path:
+   `devsim.hbt_gummel` with `params={"VBE": [0.6, 0.7], "mesh_study": True, "case": {"eb_refine": False}}`
+   (the explicit `eb_refine: False` keeps the legacy adapter on the same three meshes). Then
+   |dc.I.collector|, |dc.I.base|, |dc.I.emitter| equal hbt.IC, hbt.IB, |hbt.IE| within 1e-6 relative at both
+   biases; the sigmas agree within 1e-3 relative; `verification["mesh"]["passed"]` is the same on both paths; and
+   the `conservative_bound` value of every point is the same (legacy record: `quantities["hbt.IC"]` etc.).
+   **R6:** the same problem at `fidelity="paper"` on `device.devsim` returns status "ok" (the gatekeeper accepts
+   it), and at paper fidelity on `device.charon` a Charon-compatible diode returns `invalid_input` with the A4.2
+   message.
+8. **Clarifications after the checker's report on A4.** (a) The study runs its three meshes with the exact scales
+   s0, s0/r, s0/r^2. A separate hub job at a recorded scale goes through the 12-significant-digit rounding of job
+   keys, so for s0/r (an irrational number) it can differ from the study's middle run by about 1e-9 relative; the
+   coarse and fine scales are exact. This is why the Kirchhoff-residual sigma, a difference of cancellations, is
+   only reproducible to about 1e-3 from outside. (b) A below-floor point records `order`, `gci_fine` and
+   `asymptotic_ratio` as None. (c) `verification["mesh"]["quantities"]` holds the `dc.I.<contact>` entries only.
+   (d) A non-finite `order` (finest two values identical) is stored as None by the result envelope. (e) The legacy
+   record's `passed` also counts `hbt.beta`, which the new path does not have; R5 compares `passed` as written and
+   the per-point `conservative_bound` values are the stronger check. (f) R5 result on 15 Nov (build machine):
+   values identical, sigmas within 1.8e-14 relative, `passed` False on both paths: without the legacy adapter's
+   `eb_refine` mesh the HBT is not in the asymptotic range at mesh scale 1, so most points carry the conservative
+   bound. The library device has no `eb_refine` variant yet.
