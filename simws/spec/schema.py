@@ -307,7 +307,36 @@ class DCSweep(_M):
     fixed_V: Dict[str, float] = Field(default_factory=dict)
 
 
-Analysis = Union[Equilibrium, DCSweep]
+class Bias(_M):
+    """One contact of a DC operating point: ramped to value_V in steps of at most step_V."""
+    contact: str
+    value_V: float
+    step_V: float = Field(default=0.05, gt=0)
+
+
+class SmallSignal(_M):
+    """Two-port AC small-signal analysis about a DC operating point (contract A6). The bias entries are ramped in
+    the order given; every other contact stays at 0 V. ports = (port 1, port 2); every other contact is AC ground.
+    Result: the operating-point currents and the Y parameters at every frequency."""
+    kind: Literal["small_signal"] = "small_signal"
+    bias: List[Bias] = Field(default_factory=list)
+    ports: Tuple[str, str]
+    frequencies_Hz: List[float] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ok(self):
+        names = [b.contact for b in self.bias]
+        if len(set(names)) != len(names):
+            raise ValueError("small_signal: a contact may appear once in bias")
+        if self.ports[0] == self.ports[1]:
+            raise ValueError("small_signal: the two ports must be different contacts")
+        f = self.frequencies_Hz
+        if any(x <= 0 for x in f) or any(b <= a for a, b in zip(f, f[1:])):
+            raise ValueError("small_signal: frequencies must be positive and strictly increasing")
+        return self
+
+
+Analysis = Union[Equilibrium, DCSweep, SmallSignal]
 
 
 class Numerics(_M):
@@ -335,6 +364,10 @@ class Problem(_M):
                     raise ValueError(f"analysis: unknown contact '{n}'")
             if len(set(used)) != len(used):
                 raise ValueError("analysis: a contact may be swept, tracking or fixed, not several of these")
+        if isinstance(a, SmallSignal):
+            for n in [b.contact for b in a.bias] + list(a.ports):
+                if n not in names:
+                    raise ValueError(f"analysis: unknown contact '{n}'")
         return self
 
     def problem_id(self) -> str:

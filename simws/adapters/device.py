@@ -17,6 +17,8 @@ from simws.hub.schema import Manifest, OutputSpec
 CUR = {"terminal_current": "into_device+"}
 # (unit in the engine result, canonical unit, factor)
 _UNITS = {"A/cm**2": ("A/m**2", 1e4), "A/cm": ("A/m", 1e2)}
+_Y_UNITS = {"S/cm**2": ("S/m**2", 1e4), "S/cm": ("S/m", 1e2)}
+_ROLLOFF_MIN = 1e-6                         # smallest relative fall of |h21| that counts as a roll-off (A6.8)
 _FLOOR = {"A/m**2": 1e-4, "A/m": 1e-8}      # current noise floor of the Newton tolerance, per canonical unit
 KIRCHHOFF = "dc.kirchhoff_residual"         # max over the sweep of |sum of terminal currents| / (max |I| + floor)
 _OUTPUTS = [OutputSpec(name=KIRCHHOFF, unit="dimensionless", constraint="nonnegative",
@@ -51,6 +53,9 @@ class DeviceAdapter(Adapter):
     def prepare(self, job, ctx) -> None:
         super().prepare(job, ctx)
         from simws import engines
+        if self._study(job) and _problem(job.key.params).analysis.kind == "small_signal":    # A6.6
+            raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: not available for small_signal yet "
+                               f"(small-signal results are screening fidelity)")
         if self._study(job) and not engines.module(self.ENGINE).CAPABILITY.mesh_study:      # A4.2
             raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: {self.ENGINE} cannot refine its mesh "
                                f"(so it cannot give paper-fidelity results)")
@@ -88,7 +93,7 @@ class DeviceAdapter(Adapter):
         res, problem, levels = raw["result"], raw["problem"], raw.get("levels")
         unit, factor = _UNITS[res.current_unit]
         floor = _FLOOR[unit]
-        scalar = res.analysis == "equilibrium"
+        scalar = res.analysis in ("equilibrium", "small_signal")       # one operating point: scalars
         ctx.flags += [f for f in res.flags if f not in ctx.flags]
         ctx.flags += ["extrapolated:" + s for s in raw["outside"]]
         ctx.diagnostics.update({"problem_id": problem.problem_id(), "engine": res.engine,
@@ -124,6 +129,8 @@ class DeviceAdapter(Adapter):
             rs = float((max(r3) - min(r3)) / (2 * 3 ** 0.5))
         qs.append(ctx.quantity(KIRCHHOFF, self._residual(res, factor, floor), "dimensionless", sigma=rs,
                                flags=["not_independent"] if derived else []))
+        if res.analysis == "small_signal":
+            qs += self._ac_quantities(ctx, res)
         if levels is not None:
             for q in qs:
                 q.uncertainty.components["numerical"] = q.uncertainty.sigma
@@ -135,15 +142,44 @@ class DeviceAdapter(Adapter):
                 ctx.flags.append(MS.NOT_ASYMPTOTIC_FLAG)
         return qs
 
+    @staticmethod
+    def _ac_quantities(ctx, res) -> list:
+        """A6.5: Y parameters over frequency in canonical SI, |h21|, and the scalars f_T and f_max when defined."""
+        from simws.analysis import two_port as TP
+        yunit, yfac = _Y_UNITS[res.y_unit]
+        f = [float(x) for x in res.frequencies_Hz]
+        ax = [{"name": "f", "unit": "Hz", "values": f}]
+        qs = []
+        for k in ("11", "12", "21", "22"):
+            qs.append(ctx.quantity(f"ac.y{k}_re", (np.asarray(res.y_real[k], float) * yfac).tolist(), yunit, axes=ax))
+            qs.append(ctx.quantity(f"ac.y{k}_im", (np.asarray(res.y_imag[k], float) * yfac).tolist(), yunit, axes=ax))
+        Y = [{k: complex(res.y_real[k][n], res.y_imag[k][n]) for k in ("11", "12", "21", "22")} for n in range(len(f))]
+        h = [abs(TP.h21(y["11"], y["12"], y["21"], y["22"])) for y in Y]
+        qs.append(ctx.quantity("ac.h21_abs", h, "dimensionless", axes=ax))
+        # A6.8: a fall of |h21| below 1e-6 relative is solver noise, not a roll-off (a passive one-port gives 1.0)
+        ft = TP.f_t_single_pole(f[-1], h[-1], h[0]) if len(f) >= 2 and h[0] > h[-1] * (1 + _ROLLOFF_MIN) else None
+        if ft is not None:
+            qs.append(ctx.quantity("ac.fT", float(ft), "Hz"))
+        elif len(f) >= 2:
+            ctx.flags.append("ac:no_rolloff")
+        y = Y[-1]
+        fm = TP.f_max(f[-1], TP.mason_u(y["11"], y["12"], y["21"], y["22"]))
+        if fm is not None:
+            qs.append(ctx.quantity("ac.fmax", float(fm), "Hz"))
+        else:
+            ctx.flags.append("ac:U_unbounded")
+        return qs
+
     def self_check(self, job, ctx, qs) -> List[str]:
         cur = [q for q in qs if q.name.startswith("dc.I.")]
         if not cur:
             return ["no currents"]
         unit = cur[0].unit
         floor = _FLOOR[unit]
+        biased = any(q.name.startswith("ac.") for q in qs)   # small-signal: scalars at a biased operating point
         qs = [q for q in qs if q.name.startswith("dc.I.")]
         I = np.array([np.atleast_1d(q.array()) for q in qs])
-        if not qs[0].axes:                                   # equilibrium: every current vanishes
+        if not qs[0].axes and not biased:                    # equilibrium: every current vanishes
             worst = float(np.max(np.abs(I)))
             return [] if worst < floor else [f"equilibrium current {worst:.3e} {unit} above the {floor:g} floor"]
         return G.kirchhoff(list(I), rtol=1e-4, atol=floor)
@@ -152,8 +188,8 @@ class DeviceAdapter(Adapter):
 class DeviceDevsim(DeviceAdapter):
     ENGINE = "devsim"
     manifest = Manifest(
-        name="device.devsim", version="1.1", env="tcad", engine="devsim", engine_version="env-locked",
-        description="Any simws.spec Problem (equilibrium or DC sweep) on the DEVSIM translator",
+        name="device.devsim", version="1.2", env="tcad", engine="devsim", engine_version="env-locked",
+        description="Any simws.spec Problem (equilibrium, DC sweep or small-signal) on the DEVSIM translator",
         verification={"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"},
         inputs=["problem"], outputs=_OUTPUTS, native_conventions=CUR, citations=["devsim"])
 
@@ -161,7 +197,7 @@ class DeviceDevsim(DeviceAdapter):
 class DeviceCharon(DeviceAdapter):
     ENGINE = "charon"
     manifest = Manifest(
-        name="device.charon", version="1.1", env="tcad", engine="charon", engine_version="env-locked",
+        name="device.charon", version="1.2", env="tcad", engine="charon", engine_version="env-locked",
         description="Any simws.spec Problem the Charon translator supports (1D pn DC sweeps)",
         # no citation key yet: "charon" is not in simws.hub.citations, and a key that is not registered makes
         # citations.bibliography() raise. Add the checked reference there first, then cite it here.

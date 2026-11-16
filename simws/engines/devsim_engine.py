@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from simws.engines.base import Capability, EngineNotAvailable, EngineResult, Unsupported
-from simws.spec.schema import DCSweep, DopingTerm, GradeTerm, Problem
+from simws.spec.schema import DCSweep, DopingTerm, GradeTerm, Problem, SmallSignal
 
 UM = 1e-4                  # micrometre -> cm
 DEVICE, MESH = "d", "m"
@@ -26,7 +26,7 @@ CAPABILITY = Capability(
     contact_kinds=["ohmic"], statistics=["boltzmann", "fermi_dirac"], mobility=["constant", "masetti", "klaassen"],
     velocity_saturation=[False, True], srh=["off", "constant", "scharfetter"], auger=[False, True],
     band_gap_narrowing=["off", "slotboom"], incomplete_ionization=["off", "altermatt", "constant_energy"],
-    impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep"],
+    impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep", "small_signal"],
     tested_temperature_K=(250.0, 400.0), mesh_study=True,
     notes="2D contacts only on y_min / y_max (pad regions); one grading term; one region starting at the origin")
 
@@ -187,6 +187,16 @@ def _json(x: Any) -> Any:
     return x if x is None or isinstance(x, str) else str(x)
 
 
+def _source(contact: str) -> str:
+    """Name of the voltage source on a circuit contact."""
+    return f"V_{contact}"
+
+
+def _node(contact: str) -> str:
+    from simws.tcad.physics import _bias
+    return _bias(contact)
+
+
 def _no_convergence(e: BaseException) -> bool:
     m = str(e).lower()
     return "converge" in m or "stalled" in m
@@ -238,9 +248,14 @@ def _build(problem: Problem) -> _State:
     net, tot = doping_expressions(problem)
     phys = physics_from(problem)
     num = problem.numerics
+    circuit = isinstance(problem.analysis, SmallSignal)      # A6.4: AC needs every contact on a voltage source
+    if circuit:
+        from devsim import circuit_element
+        for c in dev.contacts:
+            circuit_element(name=_source(c.name), n1=_node(c.name), n2="0", value=0.0)
     try:
         used = setup_region(DEVICE, region.name, load(region.material), net, tot, phys,
-                            {c.name: False for c in dev.contacts})
+                            {c.name: circuit for c in dev.contacts})
     except RuntimeError as e:
         if _no_convergence(e):
             raise NotConverged(f"equilibrium solve at 0 V: {e}") from e
@@ -253,6 +268,9 @@ def _build(problem: Problem) -> _State:
         if tol > num.relative_error:
             flags.append(f"newton_rel_tol:{tol:g}")
     opts = dict(absolute_error=num.absolute_error, relative_error=tol, maximum_iterations=num.max_iterations)
+    if problem.models.temperature_K < 250.0:             # contract A5.4: the legacy adapter's warning, kept
+        flags.append("cryo_unvalidated: below 250 K checked against closed forms and Charon only, "
+                     "not against measured devices")
     return _State(problem, used, region.name, opts, flags)
 
 
@@ -270,6 +288,8 @@ def run(problem: Problem, workdir: Optional[Path] = None) -> EngineResult:
     an = problem.analysis
     unit = "A/cm**2" if problem.device.dimension == 1 else "A/cm"
     diag = {"used": _json(st.used), "solver_options": _json(st.opts), "n_contacts": len(contacts)}
+    if isinstance(an, SmallSignal):
+        return _small_signal(problem, st, contacts, unit, diag)
     if not isinstance(an, DCSweep):
         i0 = st.currents()
         return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="equilibrium",
@@ -295,3 +315,48 @@ def run(problem: Problem, workdir: Optional[Path] = None) -> EngineResult:
     return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="dc_sweep",
                         sweep_contact=an.contact, sweep_V=[float(v) for v in an.values_V], currents=cur,
                         current_unit=unit, flags=st.flags, diagnostics=_json(diag))
+
+
+def _small_signal(problem: Problem, st: "_State", contacts: List[str], unit: str, diag: dict) -> EngineResult:
+    """A6.4: ramp the sources to the operating point, then the legacy Y-parameter procedure
+    (simws.tcad.small_signal.y_params) for the two ports."""
+    from devsim import circuit_alter, get_circuit_node_value, solve
+    from simws.hub.adapter import NotConverged
+    from simws.tcad.solve import ramp_source
+    an = problem.analysis
+    flags = list(st.flags)
+    cb = None
+    if st.callback is not None:                              # Klaassen: outer iteration after every ramp step
+        cb = lambda _v=None: st.callback(_v)                 # noqa: E731
+        flags.append("ac:frozen_mobility_linearisation")
+    reached = "0 V"
+    try:
+        for b in an.bias:
+            start = get_circuit_node_value(node=_node(b.contact), solution="dcop")
+            ramp_source(_source(b.contact), b.value_V, start=start, step=b.step_V, callback=cb, **st.opts)
+            reached = f"{b.contact} = {b.value_V:g} V"
+        if cb:
+            cb()
+    except RuntimeError as e:
+        if not _no_convergence(e):
+            raise
+        raise NotConverged(f"operating point: reached {reached}: {e}") from e
+
+    def src_i(contact: str, solution: str) -> float:
+        return float(get_circuit_node_value(node=f"{_source(contact)}.I", solution=solution))
+
+    dc = {c: [-src_i(c, "dcop")] for c in contacts}          # current into the device
+    yr = {k: [] for k in ("11", "12", "21", "22")}
+    yi = {k: [] for k in ("11", "12", "21", "22")}
+    for f in an.frequencies_Hz:
+        for j, drive in enumerate(an.ports, start=1):
+            circuit_alter(name=_source(drive), param="acreal", value=1.0)
+            solve(type="ac", frequency=float(f))
+            for i, port in enumerate(an.ports, start=1):
+                yr[f"{i}{j}"].append(-src_i(port, "ssac_real"))
+                yi[f"{i}{j}"].append(-src_i(port, "ssac_imag"))
+            circuit_alter(name=_source(drive), param="acreal", value=0.0)
+    return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="small_signal",
+                        sweep_contact=None, sweep_V=[0.0], currents=dc, current_unit=unit, flags=flags,
+                        diagnostics=_json(diag), frequencies_Hz=[float(f) for f in an.frequencies_Hz],
+                        y_real=yr, y_imag=yi, y_unit="S/cm**2" if problem.device.dimension == 1 else "S/cm")

@@ -39,11 +39,15 @@ def pn_diode_1d(NA_cm3: float = 1e17, ND_cm3: float = 1e16, junction_um: float =
 def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t_e: float = 0.03, w_b: float = 0.05,
                N_E: float = 1e20, N_B: float = 2e18, N_C: float = 5e16, N_SC: float = 1e19, y_sc: float = 1.0,
                x_xb: float = 0.7, y_xb: float = 0.1, x_bc: float = 0.9, ge_peak: float = 0.15, ge_start: float = 0.0,
-               tau_s: float = 1e-6, T: float = 300.0, mesh_scale: float = 1.0,
+               tau_s: float = 1e-6, T: float = 300.0, mesh_scale: float = 1.0, eb_refine: bool = False,
+               cryo: bool = False,
                VBE: Optional[Sequence[float]] = None, VCB: float = 0.0) -> Problem:
     """2D npn SiGe HBT (ge_peak = 0: the Si BJT twin); the geometry, doping and mesh of simws.tcad.hbt.HBTCase with
     its default (non-cryogenic, eb_refine off) settings. y is depth from the top surface; the emitter and base
     contacts are on top (y_min), the collector contact covers the bottom (y_max).
+
+    eb_refine=True uses the legacy refined junction mesh (what the legacy adapter switches on at paper fidelity).
+    cryo=True uses the legacy cold-device physics (HBTCase(cryo=True)), needed below about 250 K.
 
     The Gummel analysis follows the legacy sweep: at each VBE the collector is ramped to VBE + VCB (0.1 V steps),
     then the base to VBE (0.05 V steps); the emitter stays at 0 V."""
@@ -64,6 +68,16 @@ def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t
     x_lines = sorted({(0.0, 0.05), (w_e - 0.05, 0.02), (w_e, 0.01), (w_e + 0.05, 0.02), (x_xb, 0.02), (x_bc, 0.05),
                       (width_um, 0.1)})
     y_lines = [(0.0, 0.005), (t_e, 0.002), (yb, 0.002), (yb + 0.1, 0.01), (y_sc, 0.05), (depth_um, 0.1)]
+    if eb_refine:
+        # contract A5: the legacy HBTCase.eb_refine mesh. The emitter-base doping step is abrupt and the default
+        # mesh (2 nm there) is outside the asymptotic range; this grades the spacing down to 0.05 nm at the
+        # emitter-base junction and 0.2 nm at the base-collector junction.
+        x_lines = sorted({(x, h) for x, h in x_lines if abs(x - w_e) > 0.009} |
+                         {(w_e - 0.008, 0.001), (w_e - 0.002, 0.0002), (w_e, 0.00005), (w_e + 0.002, 0.0002),
+                          (w_e + 0.008, 0.001)})
+        y_lines = sorted([(0.0, 0.005), (t_e - 0.008, 0.001), (t_e - 0.002, 0.0002), (t_e, 0.00005),
+                          (t_e + 0.002, 0.0002), (t_e + 0.008, 0.001), (yb - 0.003, 0.0005), (yb, 0.0002),
+                          (yb + 0.003, 0.0005), (yb + 0.1, 0.01), (y_sc, 0.05), (depth_um, 0.1)])
     dev = DeviceSpec(
         name="npn_hbt_2d", dimension=2,
         regions=[Region(name="si", material="silicon", box=Box(x=(0.0, width_um), y=(0.0, depth_um)))],
@@ -73,8 +87,12 @@ def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t
         doping=doping, grading=grading,
         mesh=MeshHints(x_lines=x_lines, y_lines=y_lines, scale=mesh_scale),
         description="2D npn SiGe HBT (legacy HBTCase layout)")
-    models = ModelSpec(temperature_K=T, mobility="masetti", srh="constant", tau_n_s=tau_s, tau_p_s=tau_s, auger=True,
-                       band_gap_narrowing="slotboom")
+    # cryo=True is the legacy HBTCase(cryo=True) physics (contract A5): Fermi-Dirac statistics, Klaassen mobility,
+    # Altermatt incomplete ionization; the engine switches to extended precision below 200 K on its own
+    models = ModelSpec(temperature_K=T, mobility="klaassen" if cryo else "masetti", srh="constant", tau_n_s=tau_s,
+                       tau_p_s=tau_s, auger=True, band_gap_narrowing="slotboom",
+                       statistics="fermi_dirac" if cryo else "boltzmann",
+                       incomplete_ionization="altermatt" if cryo else "off")
     if VBE is None:
         analysis = Equilibrium()
     else:

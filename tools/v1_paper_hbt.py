@@ -3,7 +3,10 @@
 Runs the library SiGe HBT at two biases through the hub at paper fidelity: three meshes, an error bar on every
 terminal current (contract amendment A4), accepted by the gatekeeper.
 
-    PYTHONPATH=. ~/miniforge3/envs/tcad/bin/python tools/v1_paper_hbt.py [--store DIR] [--inprocess]
+    PYTHONPATH=. ~/miniforge3/envs/tcad/bin/python tools/v1_paper_hbt.py [--store DIR] [--inprocess] [--default-mesh]
+
+With the refined emitter-base mesh (the default here, contract A5) the three meshes have about 25, 49 and 98
+thousand nodes: expect tens of minutes to a few hours depending on the machine. Use the overnight queue.
 """
 from __future__ import annotations
 
@@ -25,12 +28,15 @@ def main(argv) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--store", default=None)
     ap.add_argument("--inprocess", action="store_true")
+    ap.add_argument("--default-mesh", action="store_true",
+                    help="use the default mesh (2 nm at the emitter-base junction) instead of the refined one")
     args = ap.parse_args(argv[1:])
 
-    p = npn_hbt_2d(VBE=VBE)
+    p = npn_hbt_2d(VBE=VBE, eb_refine=not args.default_mesh)        # contract A5: refined junction mesh by default
+    print("emitter-base mesh:", "default (2 nm)" if args.default_mesh else "refined (0.05 nm at the junction)")
     hub = Hub(args.store, mode="inprocess" if args.inprocess else "subprocess")
     print("problem:", p.device.name, "| id", p.problem_id()[:12], "| store:", hub.store.root, flush=True)
-    print("running three meshes at paper fidelity (several minutes) ...", flush=True)
+    print("running three meshes at paper fidelity (refined mesh: long) ...", flush=True)
     with _quiet():
         res = hub.submit("device.devsim", params={"problem": p.model_dump(mode="json")}, fidelity="paper")
     print("status:", res.status, "| result", res.id[:12], "|", (res.message or "")[-600:])

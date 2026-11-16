@@ -181,7 +181,8 @@ def test_devsim_capability_exact():
     assert c.band_gap_narrowing == ["off", "slotboom"]
     assert c.incomplete_ionization == ["off", "altermatt", "constant_energy"]
     assert c.impact_ionization == ["off", "van_overstraeten"]
-    assert c.analyses == ["equilibrium", "dc_sweep"]
+    # contract A6.4: "small_signal" added (A6 does not fix the position in the list)
+    assert sorted(c.analyses) == ["dc_sweep", "equilibrium", "small_signal"] and len(set(c.analyses)) == 3
     assert tuple(c.tested_temperature_K) == (250.0, 400.0)
     assert c.mesh_study is True                                     # contract A4.2
 
@@ -195,7 +196,7 @@ def test_charon_capability_exact():
     assert c.statistics == ["fermi_dirac"] and c.mobility == ["constant"]
     assert c.velocity_saturation == [False] and c.srh == ["off", "constant"] and c.auger == [False]
     assert c.band_gap_narrowing == ["off"] and c.incomplete_ionization == ["constant_energy"]
-    assert c.impact_ionization == ["off"] and c.analyses == ["dc_sweep"]
+    assert c.impact_ionization == ["off"] and c.analyses == ["dc_sweep"]          # no "small_signal" (A6.6)
     assert tuple(c.tested_temperature_K) == (77.0, 300.0)
     assert c.mesh_study is False                                    # contract A4.2: Charon's meshes are fixed files
 

@@ -555,7 +555,7 @@ def test_r6_diode_paper_fidelity_ok(hub):
 def test_a4_6_manifests():
     from simws.hub import adapter as A
     d, c = A.manifest("device.devsim"), A.manifest("device.charon")
-    assert d.version == "1.1" and c.version == "1.1"
+    assert d.version == "1.2" and c.version == "1.2"           # 1.1 in A4.6, 1.2 since A6.5
     assert d.verification == {"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"}
     assert c.verification == {}
 

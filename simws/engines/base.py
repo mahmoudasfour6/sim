@@ -30,13 +30,18 @@ class EngineResult(BaseModel):
 
     engine: str
     problem_id: str
-    analysis: Literal["equilibrium", "dc_sweep"]
+    analysis: Literal["equilibrium", "dc_sweep", "small_signal"]
     sweep_contact: Optional[str] = None            # None for equilibrium
     sweep_V: List[float]                           # [0.0] for equilibrium
     currents: Dict[str, List[float]]               # contact name -> current into the device, one per sweep value
     current_unit: Literal["A/cm**2", "A/cm"]       # 1D: per cm^2 of cross-section; 2D: per cm of depth
     flags: List[str] = []
     diagnostics: Dict[str, Any] = {}               # JSON-serialisable only
+    # small_signal only (contract A6.2): y_ij = current INTO the device at port i / voltage at port j
+    frequencies_Hz: List[float] = []
+    y_real: Dict[str, List[float]] = {}            # keys "11", "12", "21", "22": one value per frequency
+    y_imag: Dict[str, List[float]] = {}
+    y_unit: Optional[Literal["S/cm**2", "S/cm"]] = None    # 1D: per cm^2 of cross-section; 2D: per cm of depth
 
 
 def _fmt(v: Any) -> str:

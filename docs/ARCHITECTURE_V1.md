@@ -562,3 +562,121 @@ Lifts the limit recorded in A1.9. The rule is the one the legacy HBT adapter has
    values identical, sigmas within 1.8e-14 relative, `passed` False on both paths: without the legacy adapter's
    `eb_refine` mesh the HBT is not in the asymptotic range at mesh scale 1, so most points carry the conservative
    bound. The library device has no `eb_refine` variant yet.
+
+### A5 (16 Nov 2026, lead): refined HBT mesh and cold-temperature HBT on the new path
+
+0. **Owner's instruction, 16 Nov:** build the refined HBT mesh, the cold-temperature path, AC analysis, and new
+   engines. Project rule 6 freezes new engines while plumbing is above 30 % of logged hours (last figure 61 %); the
+   lead pointed this out and the owner chose to go ahead with new engines. Recorded here as the dated amendment
+   that project rule 5 asks for. The engines themselves are specified in a later amendment.
+1. **Library.** `npn_hbt_2d(..., eb_refine=False, cryo=False)`. `eb_refine=True` uses the mesh lines of the legacy
+   `HBTCase(eb_refine=True)` (spacing graded to 0.05 nm at the emitter-base junction and 0.2 nm at the
+   base-collector junction). `cryo=True` selects the legacy `HBTCase(cryo=True)` physics: Fermi-Dirac statistics,
+   Klaassen mobility, Altermatt incomplete ionization. The defaults leave every earlier description (and its
+   problem id) unchanged.
+2. **Acceptance R7 (refined mesh; tolerances fixed here).**
+   R7a: for mesh scale 1 the DEVSIM node coordinates (x and y arrays of the region) built from
+   `npn_hbt_2d(eb_refine=True)` are exactly equal (`numpy.array_equal`) to those of the legacy
+   `simws.tcad.hbt.build(HBTCase(eb_refine=True))`.
+   R7b (slow): `engine.run(npn_hbt_2d(eb_refine=True, VBE=[0.6]))` against
+   `simws.tcad.hbt.gummel(HBTCase(eb_refine=True), VBE=[0.6])`: |IC| and |IB| within 1e-6 relative.
+   R7c (very slow, for the overnight queue, not part of an installer): R5 repeated with `eb_refine=True` on both
+   paths (legacy `case: {"eb_refine": True}`), same criteria as R5.
+3. **Acceptance R8 (cold temperature; tolerances fixed here; slow).** For T = 250 K with VBE = [0.65, 0.70], T = 150 K
+   with VBE = [0.85, 0.90] and T = 77 K with VBE = [1.00, 1.05]: `device.devsim` on
+   `npn_hbt_2d(T=T, cryo=True, VBE=...)` against the legacy adapter
+   `devsim.hbt_gummel` with `params={"VBE": [...], "T": T, "cryo": True}`, both through the hub at screening
+   fidelity. At every bias the legacy result keeps (it drops points below its 1e-8 A/m floor; at least one point
+   must remain per temperature), |dc.I.collector|, |dc.I.base| and |dc.I.emitter| equal hbt.IC, hbt.IB and |hbt.IE|
+   within 1e-6 relative. Flags: below 250 K the new result carries a flag starting with
+   `"extrapolated:temperature_K"`; and whenever the legacy result carries a flag starting with `"newton_rel_tol:"`,
+   so does the new one.
+   What this shows: the new path reproduces the legacy cold-device results. It does not validate them: below
+   250 K they are checked against closed forms and Charon only, never against a measured device.
+4. **After the checker's report (16 Nov).** R7a, R7b and R8 passed as written: the refined mesh is identical node
+   for node (24,521 nodes), and the currents agree with the legacy path to 1.1e-16 relative or better at 250, 150
+   and 77 K. The legacy adapter emitted no `newton_rel_tol` flag at these points, so that flag rule was not
+   exercised. R7c was not run. Added on the checker's remark: below 250 K the DEVSIM engine result also carries
+   the legacy warning flag starting with `"cryo_unvalidated:"` (the trust rules already read it as out of range).
+
+### A6 (16 Nov 2026, lead): small-signal (AC) analysis on the new path
+
+The legacy AC code (`simws.tcad.small_signal`, adapter `devsim.hbt_ac`) is written for the HBT. A6 adds a general
+two-port small-signal analysis to the description; the legacy code is unchanged and is the reference.
+
+1. **Description (`simws.spec`, additive; `SPEC_VERSION` and every existing problem id stay as they are).**
+
+   ```python
+   class Bias(_M):
+       contact: str
+       value_V: float
+       step_V: float = Field(default=0.05, gt=0)
+
+   class SmallSignal(_M):
+       kind: Literal["small_signal"] = "small_signal"
+       bias: List[Bias]                    # the DC operating point, ramped in this order; other contacts stay at 0 V
+       ports: Tuple[str, str]              # (port 1, port 2) contacts; every other contact is AC ground
+       frequencies_Hz: List[float]         # at least one, all > 0, strictly increasing
+   ```
+
+   Validation: every contact named in `bias` and `ports` exists; a contact appears at most once in `bias`; the two
+   ports differ. `Analysis = Equilibrium | DCSweep | SmallSignal`.
+2. **Engine result.** `EngineResult.analysis` may be "small_signal"; then `sweep_contact` is None, `sweep_V` is
+   `[0.0]` and `currents` holds the DC operating-point current into each contact (one value each). New fields,
+   empty for the other analyses: `frequencies_Hz: List[float]`, `y_real` and `y_imag`:
+   `Dict[str, List[float]]` with keys "11", "12", "21", "22" (one value per frequency), and
+   `y_unit: Optional[Literal["S/cm**2", "S/cm"]]` (1D: per cm^2 of cross-section; 2D: per cm of depth).
+   Sign: y_ij = (small-signal current INTO the device at port i) / (small-signal voltage at port j), all other
+   contacts AC-shorted.
+3. **Two-port figures, engine-neutral (`simws/analysis/two_port.py`, pure numpy, no engine import).**
+   With complex y11, y12, y21, y22 at a frequency f:
+   `h21 = y21 / y11`;
+   `mason_u = |y21 - y12|^2 / (4 (Re y11 Re y22 - Re y12 Re y21))`, and `inf` when that denominator is <= 0;
+   `f_t_single_pole(f, |h21|, beta0) = beta0 * f / sqrt((beta0 / |h21|)^2 - 1)`, None unless `beta0 > |h21|`;
+   `f_max(f, U) = f * sqrt(U)`, None unless U is finite and > 0.
+   These are the formulas of the legacy `small_signal.figures`.
+4. **DEVSIM translation.** Capability `analyses` gains "small_signal". Every contact is built as a circuit contact
+   with its own voltage source (as `simws.tcad.hbt.build(circuit=True)` does); the bias entries are ramped in order
+   with `simws.tcad.solve.ramp_source` and the problem's Numerics; with Klaassen mobility the legacy outer
+   iteration runs after every ramp and the result carries the flag `"ac:frozen_mobility_linearisation"` (the AC
+   solve linearises at frozen mobility, as in the legacy code). Y parameters as in the legacy
+   `small_signal.y_params`: drive one port source with unit AC amplitude, `solve(type="ac", frequency=f)`, read
+   the source currents.
+5. **Adapter quantities (`device.<engine>`, version "1.2").** `dc.I.<contact>` scalars (operating point) and
+   `dc.kirchhoff_residual` as for equilibrium; with the axis `{"name": "f", "unit": "Hz"}`:
+   `ac.y11_re`, `ac.y11_im`, ... `ac.y22_im` in "S/m" (2D: S/cm x 100) or "S/m**2" (1D: S/cm^2 x 1e4), and
+   `ac.h21_abs` (dimensionless). Scalars, present only when defined: `ac.fT` in Hz, the single-pole value with
+   beta0 = |h21| at the LOWEST frequency and |h21| at the HIGHEST frequency (needs at least two frequencies;
+   absent with the flag `"ac:no_rolloff"` when beta0 <= |h21| there); `ac.fmax` in Hz, `f_max` at the highest
+   frequency (absent with the flag `"ac:U_unbounded"` when U is not finite and positive there).
+6. **Limits, stated.** Small-signal results are screening fidelity: a mesh study (and so paper fidelity) on a
+   small-signal problem is refused with `invalid_input` and a message containing
+   `"mesh_study: not available for small_signal"`. No noise analysis. Charon does not support it.
+7. **Acceptance R9 (tolerances fixed here; slow).** Legacy: `devsim.hbt_ac` through the hub with
+   `params={"VBE": [0.75], "VCE": 1.0}`; from its `hbt.tau_charge` take fT_c = 1 / (2 pi tau) and the two
+   frequencies the legacy adapter uses, f_lo = 1e-4 fT_c and f_hi = 0.1 fT_c. New path: `device.devsim` on the
+   library HBT with `SmallSignal(bias=[Bias("collector", 1.0, 0.1), Bias("base", 0.75, 0.05)],
+   ports=("base", "collector"), frequencies_Hz=[f_lo, f_hi])` and
+   `Numerics(relative_error=1e-10, absolute_error=1e10, max_iterations=60)` (the legacy AC bias settings).
+   Then `ac.fT` and `ac.fmax` equal `hbt.fT` and `hbt.fmax` within 1e-6 relative, and `dc.I.collector`,
+   `dc.I.base` equal `hbt.IC`, `hbt.IB` within 1e-6 relative.
+8. **Roll-off guard (lead, 16 Nov, found on the first trial run before any acceptance run).** A zero-biased diode
+   returned |h21| = 1.0000000 at both frequencies and a meaningless `ac.fT` from a 1e-7 difference. `ac.fT` is
+   reported only when |h21| falls by more than 1e-6 relative between the lowest and the highest frequency;
+   otherwise it is absent with the flag `"ac:no_rolloff"`. R9 is unaffected (the legacy procedure evaluates
+   |h21| a decade below f_T, where the fall is large).
+9. **After the checker's report (16 Nov).** R9 passed: `ac.fT` 4.98316e9 Hz and `ac.fmax` 1.69436e10 Hz at
+   VBE 0.75 V, VCE 1.0 V agree with the legacy adapter to 1.3e-11 and 1.6e-11 relative, and the operating-point
+   currents exactly. **One recorded FAIL**, in the checker's own sanity test of a zero-biased diode as a one-port:
+   current conservation (y11 = -y12 = -y21 = y22) to 1e-6 relative, fixed before the run, is met by the imaginary
+   parts (1e-13) and not by the real parts: Re y11 = 4.74e-7 against -Re y12 = 4.90e-7 S/cm^2 at 1 kHz, a
+   mismatch of 7.8e-5 of |y|. The checker reproduced the same error with the legacy AC code alone, so it comes
+   from DEVSIM's AC solve, not from the translation. The tolerance is not changed and the check stays in the
+   suite as an expected failure. Post hoc: the imaginary parts conserve to 1e-9. **What it means for use:** an AC
+   conductance smaller than about 1e-4 of |Y| (here about 1e-8 S/cm^2) is solver error, not physics; capacitances
+   and the RF figures (f_T, f_max, evaluated where the real parts are large) are unaffected. The same test
+   confirmed the capacitance: 3.2335e-8 F/cm^2 against 3.1187e-8 from the depletion formula (+3.7 %, of which
+   about +3.5 % is the known correction for the carrier tails).
+   Clarifications: an empty `bias` list is allowed (zero bias); with one frequency there is no `ac.fT` and no
+   `"ac:no_rolloff"` flag; the self-check of a small-signal result is the Kirchhoff sum of the operating-point
+   currents; the mesh-study refusal happens before the engine runs; `Bias` takes keyword arguments.
