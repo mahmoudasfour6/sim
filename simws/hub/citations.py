@@ -15,6 +15,12 @@ from __future__ import annotations
 from typing import Dict, Iterable, List
 
 REGISTRY: Dict[str, dict] = {
+    "lucsanyi2022": dict(type="article",
+                         author="D. Lucsanyi and R. Garcia Alia and K. Bilko and M. Cecchetto and S. Fiore and E. Pirovano",
+                         title="G4SEE: A Geant4-Based Single Event Effect Simulation Toolkit and Its Validation Through "
+                               "Monoenergetic Neutron Measurements",
+                         journal="IEEE Transactions on Nuclear Science", volume="69", number="3", pages="273--281",
+                         year="2022", doi="10.1109/TNS.2022.3149989", checked=True),
     # DOI as printed in the RustBCA README; volume, number and year from the JOSS record were not re-checked
     "drobny2021": dict(type="article", author="J. T. Drobny and D. Curreli",
                        title="RustBCA: A High-Performance Binary-Collision-Approximation Code for Ion-Material Interactions",

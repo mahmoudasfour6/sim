@@ -102,11 +102,41 @@ What to keep in mind when reading an implant result:
 - Every implant result is `unverified`: there is no second implant engine yet to compare with.
 - No damage or vacancy profiles yet, and no beams above 25 keV per nucleon.
 
+## Single-event energy deposition (third problem family, engine G4SEE)
+
+What does one particle leave in a small sensitive volume (SV) of a chip? The description is a particle source, a
+silicon block with an SV inside and optional back-end-of-line layers on top, and a histogram. It needs the G4SEE
+engine once: `bash tools/install_g4see.sh` (it makes a separate conda env `g4see` with Geant4 11.2.2 and builds
+G4SEE v1.0 there; a few GB of Geant4 data are downloaded the first time).
+
+```python
+from simws.spec.library import see_si_slab
+
+p = see_si_slab("alpha", energy_MeV=5.0, sv_thickness_um=10.0)          # 5 MeV alphas, SV 0 to 10 um deep
+p = see_si_slab("proton", 10.0, sv_thickness_um=2.0, sv_depth_um=5.0,   # buried SV under two BEOL layers
+                beol=[("passivation", "G4_SILICON_DIOXIDE", 1.0), ("metal", "G4_Cu", 0.5)])
+r = hub.submit("see.g4see", params={"problem": p})
+r.q("see.edep_mean")        # eV, with error bar (counting + histogram binning)
+r.q("see.p_above")          # probability per particle of leaving at least the threshold, axis "threshold" (eV)
+r.q("see.edep_spectrum")    # probability per eV, axis "edep"
+```
+
+`python tools/v1_see_demo.py` runs alphas and protons and compares the mean deposit with the NIST stopping
+tables.
+
+What to keep in mind:
+
+- Electromagnetic physics only unless you set `hadronic="ftfp_bert_hp"` (flag `see:em_only`): without it, no
+  nuclear reactions, so neutrons deposit nothing.
+- Energy, not charge: dividing by the electron-hole pair energy of silicon is left to you.
+- The checks so far (alphas and protons, 5 to 10 MeV, silicon) test the set-up against the NIST tables, which
+  Geant4 shares; every result is `unverified` because there is no second, independent single-event code yet.
+
 ## What is not in v1
 
 - DEVSIM translator limits: one silicon region (with Ge grading), ohmic contacts; equilibrium, DC sweeps and
   two-port small-signal analysis. Noise, strikes, Schottky contacts, MOS and SiC are still only in the legacy
   modules. Mesh error bars exist for DC results, not for AC.
 - Charon runs one case: the 1D abrupt pn diode.
-- Implantation: see the limits above.
+- Implantation and single events: see the limits above.
 - The 23 workflow scripts that bypass the hub are unchanged.

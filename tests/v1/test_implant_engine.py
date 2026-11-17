@@ -208,8 +208,8 @@ def test_plan_implant_problem():
     pl = plan(p)
     assert pl.problem_id == p.problem_id()
     assert pl.primary == "rustbca" and pl.checkers == []
-    assert set(pl.refused) == {"devsim", "charon"}
-    for n in ("devsim", "charon"):
+    assert set(pl.refused) == {"devsim", "charon", "g4see"}          # amended by the lead (A8.3): fourth engine
+    for n in ("devsim", "charon", "g4see"):
         assert len(pl.refused[n]) == 1 and pl.refused[n][0].startswith("problem kind:")
     assert pl.warnings == {}
     assert "rustbca" in pl.summary()

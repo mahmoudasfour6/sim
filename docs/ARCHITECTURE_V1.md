@@ -938,3 +938,241 @@ study layer are shared. Owner's instruction for new engines: A5.0.
    **Next for this engine, not done here:** an electronic-stopping correction per ion and target taken from a
    source (the SRIM stopping tables the workspace can already read), with the range tables held out as the test;
    a second implant engine, so that results can become "verified"; damage profiles through a streaming path.
+
+### A8 (17 Nov 2026, lead): single-event energy deposition as a third problem family; engine G4SEE
+
+A particle hits a chip; how much energy does it leave in a small sensitive volume (SV), event by event? That
+spectrum is the first step of every single-event-effect estimate. It gets its own description and result type
+(as A7 did for implants); hub, store, trust, compare, catalogue and study are shared. Owner's instruction: A5.0.
+
+0. **What the lead had already seen when this was written.** (a) G4SEE v1.0 (Lucsanyi et al., CERN; GPL-3) built
+   here against Geant4 11.2.2 from conda-forge. (b) One trial run to learn the macro and output format, not an
+   acceptance case: 2000 protons of 3 MeV into a 20 um silicon SV, 3 s. (c) The reference values of R22 to R25
+   below, computed from the NIST tables before any acceptance run. No acceptance case below had been run.
+1. **Description (`simws/spec/see.py`, exported from `simws.spec`).** Units in the field names. All classes forbid
+   unknown fields; every violated rule raises pydantic's `ValidationError`.
+
+   ```python
+   G4_MATERIAL = r"^G4_[A-Za-z0-9_]+$"   # a Geant4 NIST material name, e.g. "G4_Si", "G4_SILICON_DIOXIDE"
+
+   class SeeSource(_M):
+       particle: Literal["proton", "alpha", "neutron", "e-", "gamma", "ion"]
+       ion_Z: Optional[int] = None          # 1..118; required when particle == "ion", forbidden otherwise
+       ion_A: Optional[int] = None          # >= ion_Z; required when particle == "ion", forbidden otherwise
+       energy_MeV: float                    # > 0, kinetic energy of the whole particle
+       tilt_deg: float = 0.0                # 0 <= tilt < 90, from the surface normal
+
+   class BeolLayer(_M):
+       name: str                            # not empty
+       material: str                        # matches G4_MATERIAL
+       thickness_um: float                  # > 0
+
+   class SeeGeometry(_M):
+       bulk_material: str = "G4_Si"         # matches G4_MATERIAL; the SV is made of the same material
+       bulk_width_um: float                 # > 0, both lateral sides
+       bulk_thickness_um: float             # > 0
+       sv_depth_um: float = 0.0             # >= 0: top of the SV below the top of the bulk
+       sv_width_um: Tuple[float, float]     # each > 0 and <= bulk_width_um
+       sv_thickness_um: float               # > 0; sv_depth_um + sv_thickness_um <= bulk_thickness_um
+       beol: List[BeolLayer] = []           # layers on top of the bulk, the beam side first; names unique
+
+   class SeePhysics(_M):
+       em: Literal["option4", "option3", "livermore"] = "option4"
+       hadronic: Literal["none", "ftfp_bert_hp"] = "none"
+
+   class EdepHistogram(_M):
+       scale: Literal["lin", "log"] = "lin"
+       bins: int = 2000                     # 10 <= bins <= 20000
+       low_MeV: float = 0.0                 # >= 0; > 0 when scale == "log"
+       high_MeV: float                      # > low_MeV
+
+   class SeeStatistics(_M):
+       n_events: int = 10000                # 100 <= n_events <= 100_000_000
+       seed: int = 1                        # >= 0
+
+   class SeeProblem(_M):
+       spec_version: str = "1.0"
+       kind: Literal["see"] = "see"
+       source: SeeSource
+       geometry: SeeGeometry
+       physics: SeePhysics = SeePhysics()
+       histogram: EdepHistogram
+       statistics: SeeStatistics = SeeStatistics()
+       def problem_id(self) -> str: ...                 # same recipe as Problem.problem_id
+       def with_changes(self, changes) -> "SeeProblem": ...       # dotted paths, validated again
+   ```
+
+   `simws.spec.family(problem)` returns `"see"` for a `SeeProblem` (A7.1 otherwise unchanged).
+2. **Library (`simws.spec.library.see_si_slab`).**
+   `see_si_slab(particle="alpha", energy_MeV=5.0, sv_thickness_um=10.0, sv_depth_um=0.0, bulk_thickness_um=100.0,
+   width_um=1000.0, tilt_deg=0.0, beol=None, ion_Z=None, ion_A=None, hadronic="none", n_events=10000, seed=1,
+   bins=2000, high_MeV=None)` returns a `SeeProblem`: bulk "G4_Si" of `width_um` x `width_um` x
+   `bulk_thickness_um`, SV of `width_um` x `width_um` x `sv_thickness_um` at `sv_depth_um`; `beol` is a list of
+   `(name, material, thickness_um)` tuples, beam side first; a linear histogram from 0 to `high_MeV`, which
+   defaults to 1.05 x `energy_MeV`. Only Geant4's own material data are used (G4_Si: 2.33 g/cm3), so the library
+   introduces no numbers of its own.
+3. **Engine layer (`simws/engines/base.py`, additive).**
+
+   ```python
+   class SeeResult(BaseModel):              # forbids unknown fields
+       engine: str
+       problem_id: str
+       n_events: int
+       edges_MeV: List[float]               # bins + 1 values, from the description (see 4), increasing
+       counts: List[float]                  # bins values: events with edges[i] <= Edep < edges[i+1]
+       underflow: float                     # events with Edep < low_MeV
+       overflow: float                      # events with Edep >= high_MeV
+       flags: List[str] = []
+       diagnostics: Dict[str, Any] = {}
+
+   class SeeCapability(BaseModel):          # forbids unknown fields; every list holds the ALLOWED values
+       engine: str
+       env: str
+       description: str
+       in_process: bool
+       particles: List[str]
+       em: List[str]
+       hadronic: List[str]
+       max_beol_layers: int
+       tested_particles: List[str]
+       tested_energy_MeV: Tuple[float, float]
+       tested_materials: List[str]
+       tested_em: List[str]
+       tested_hadronic: List[str]
+       notes: str = ""
+       def unsupported(self, problem) -> List[str]: ...
+       def outside_tested_range(self, problem) -> List[str]: ...
+   ```
+
+   `unsupported`: one reason per violated field, starting with `"particles:"`, `"em:"`, `"hadronic:"` or
+   `"max_beol_layers:"`. `outside_tested_range` (bounds included): `"particle:"` when the particle is not in
+   `tested_particles`; `"energy_MeV:"` outside `tested_energy_MeV`; `"materials:"` when the bulk or a BEOL
+   material is not in `tested_materials`; `"em:"`, `"hadronic:"` when not in the tested lists; else `[]`.
+   Registry: `ENGINES` gains `"g4see": "simws.engines.g4see_engine"` with `FAMILY = "see"`; the A7.3 rules on
+   families, `adapter_name` ("see.g4see") and the `"problem kind:"` refusal apply to all three families.
+4. **G4SEE translation (`simws/engines/g4see_engine.py`; `FAMILY = "see"`).** G4SEE v1.0 (git tag v1.0, commit
+   8c6fc45; D. Lucsanyi, R. Garcia Alia, K. Bilko, M. Cecchetto, S. Fiore, E. Pirovano, "G4SEE: A Geant4-Based
+   Single Event Effect Simulation Toolkit and Its Validation Through Monoenergetic Neutron Measurements", IEEE
+   Trans. Nucl. Sci. 69(3), 273-281, 2022, doi 10.1109/TNS.2022.3149989), single-threaded build, against Geant4 11.2.2, run as an
+   executable (out of process). Module functions: `available()`, `unsupported(problem)`,
+   `build_macro(problem) -> str` (pure Python, needs no Geant4), `edges(problem) -> List[float]`,
+   `parse_histogram(path, problem) -> (counts, underflow, overflow)`, `run(problem, workdir) -> SeeResult`.
+   Where it is: the conda env prefix in `SIMWS_G4SEE_PREFIX`, else `<envs_root>/g4see` from the simws
+   configuration; the executable is `<prefix>/bin/g4see`; `available()` is True when that file exists and is
+   executable. Geant4 data paths come from `simws.radiation.geant4.dataset_env(prefix)`.
+   Capability: particles ["proton", "alpha", "neutron", "e-", "gamma", "ion"]; em ["option4", "option3",
+   "livermore"]; hadronic ["none", "ftfp_bert_hp"]; max_beol_layers 20; tested_particles ["alpha", "proton"];
+   tested_energy_MeV (5.0, 10.0); tested_materials ["G4_Si"]; tested_em ["option4"]; tested_hadronic ["none"]
+   (the cases of R22 to R25); env "g4see"; in_process False.
+   The macro (`build_macro`) contains, in this order of sections:
+   `/random/setSeeds <2 seed + 1> <2 seed + 2>`;
+   `/SEE/geometry/Bulk <bulk_material> <bulk_width_um> um <bulk_thickness_um> um`;
+   `/SEE/geometry/SV 0 0 -<sv_depth_um> um <wx> <wy> um <sv_thickness_um> um`;
+   one `/SEE/geometry/BEOL/addLayer <material> <bulk_width_um> um <thickness_um> um <name>` per layer **in
+   reverse order** (G4SEE stacks each new layer on top of the previous one, the description lists the beam side
+   first);
+   `/SEE/physics/addPhysics G4EmStandardPhysics_option3` or `G4EmLivermorePhysics` when em is not option4 (G4SEE
+   adds option4 itself); for hadronic "ftfp_bert_hp" the four modules `G4HadronElasticPhysicsHP`,
+   `G4HadronPhysicsFTFP_BERT_HP`, `G4IonElasticPhysics`, `G4IonPhysics`;
+   `/run/initialize`;
+   `/gps/particle <particle>` (and `/gps/ion <Z> <A>` for an ion), `/gps/ene/type Mono`,
+   `/gps/ene/mono <energy_MeV> MeV`, `/gps/pos/type Point`,
+   `/gps/direction <sin tilt> 0 <-cos tilt>`, `/gps/pos/centre <x0> 0 <z0> um` with z0 = (total BEOL thickness
+   + 1) um and x0 = -tan(tilt) um, so the beam enters the top of the stack at x = 0;
+   `/SEE/scoring/standard/Edep 0`, `/SEE/scoring/setHistogram <scale> <bins> <low_MeV> <high_MeV> MeV`,
+   `/SEE/scoring/setPrecision 10` (G4SEE's default of 4 significant digits loses counts above 9999);
+   `/run/beamOn <n_events>`.
+   `edges(problem)`: lin: low + i (high - low) / bins; log: 10^(log10 low + i (log10 high - log10 low) / bins),
+   i = 0 .. bins (G4SEE's own formulas). `parse_histogram` reads `Edep_0_hist_t0.out` and raises `ValueError`
+   when the number of bins differs, or when a printed bin edge differs from `edges(problem)` by more than 1e-6
+   relative (1e-12 MeV absolute for an edge of 0).
+   `run` writes the macro to `<workdir>/g4see_<problem id, 12 characters>/run.mac`, creates `out/` there, runs
+   `<exe> run.mac -o out` in that folder with the Geant4 data variables set, writes its output to `g4see.log`
+   there, raises `RuntimeError` with the last 20 lines of that log when it exits with an error, and raises
+   `EngineNotAvailable` / `Unsupported` as the other engines do. Flags on every result: one starting with
+   `"see:em_only"` when hadronic is "none" (no nuclear reactions: neutrons deposit nothing, protons and ions lose
+   their nuclear-reaction events).
+5. **Adapter `see.g4see`** (`simws/adapters/see.py`: base `SeeAdapter`, subclass `SeeG4see`; manifest version
+   "1.0", env "tcad", inputs ["problem"], citation "lucsanyi2022"). Invalid description, refused problem and missing
+   engine behave as in A7.5. With N = n_events, c_i the counts, w_i = edges[i+1] - edges[i], m_i the bin centres
+   (lin) or geometric centres sqrt(edges[i] edges[i+1]) (log), all energies converted to eV:
+
+   | quantity | unit | value | standard uncertainty |
+   |---|---|---|---|
+   | `see.edep_spectrum` | 1/eV | c_i / (N w_i), axis `{"name": "edep", "unit": "eV"}` at m_i | sqrt(max(c_i, 1)) / (N w_i) |
+   | `see.p_above` | dimensionless | (sum of c_j for j >= i, + overflow) / N, axis `{"name": "threshold", "unit": "eV"}` at edges[i], i = 0 .. bins-1 | sqrt(p(1-p)/N), p = (k+1)/(N+2), k the count |
+   | `see.fraction_underflow`, `see.fraction_overflow` | dimensionless | count / N | as `see.p_above` |
+   | `see.edep_mean` (only when underflow = overflow = 0) | eV | sum c_i m_i / N | sqrt(s^2/N + b^2), s = sqrt(sum c_i (m_i - mean)^2 / (N - 1)), b = (largest w_i with c_i > 0) / sqrt(12) |
+   | `see.edep_std` (same condition) | eV | s | (s/2) sqrt((m4/s^4 - (N-3)/(N-1)) / N), m4 = sum c_i (m_i - mean)^4 / N |
+
+   `see.edep_spectrum`, `see.p_above`, `see.fraction_underflow` and `see.fraction_overflow` are declared outputs.
+   Uncertainty components: "statistical" (the counting part; for `see.edep_mean` sqrt(s^2/N)) on every quantity,
+   and "binning" = b on `see.edep_mean`; the result carries the flag `"budget:statistical_and_binning"`. When
+   the mean is not reported, the flag starting with `"see:mean_undefined:"` says how many events fell outside
+   the histogram. Self-check (status `check_failed`): underflow + overflow + sum of counts differs from N by
+   more than 1e-6 N; or paper fidelity with N < 10000. Each `outside_tested_range` string s gives the flag
+   `"extrapolated:" + s`.
+6. **Limits, stated.** One SV, box geometry, a point source with one energy and one direction; histogram
+   statistics only (no event-by-event list, no charge or current); single-threaded. Trust stays "unverified":
+   the only other Geant4 path in simws (`simws.radiation.geant4`, g4track) runs the same Geant4, so a comparison
+   with it is not independent (A2). R22 to R25 compare with NIST tables built on ICRU Report 49; Geant4's
+   low-energy stopping for alphas and protons in standard materials is expected to rest on the same ICRU 49
+   data, so these checks test the translation (geometry, units, direction, histogram), not the physics.
+7. **Acceptance (tolerances fixed here, before any of these runs).** Library problems, 10 000 events, seed 1,
+   unless stated. "Within 4 sigma" as in A7.7.
+   Reference method for R22 to R25: integrate dE/dx = -S(E) rho along the path through silicon (RK4, step
+   0.01 um), S the NIST total (electronic + nuclear) stopping power interpolated linearly in log S against
+   log E, rho = 2.33 g/cm3; the expected mean deposit is E(entry of the SV) - E(exit of the SV). Tables:
+   ASTAR (alphas) and PSTAR (protons) for silicon, NIST Standard Reference Database 124
+   (https://physics.nist.gov/PhysRefData/Star/Text/, retrieved 17 Nov 2026, default energy grid), stored with
+   their source in `simws/data/nist_star/` and read by `simws.radiation.nist_star`. Values from that method:
+   R22 1.6137 MeV, R23 0.8327 MeV, R24 0.8558 MeV; removing every other table point changes them by at most
+   0.13 %.
+   R20 (repeatability): `see_si_slab(n_events=1000)` twice gives identical counts; seed 2 gives different counts.
+   R21 (bookkeeping): in every run of R20 to R26, underflow + overflow + sum of counts = N, and
+   `see.p_above` at threshold 0 is 1 when underflow is 0.
+   R22 (alpha, partial): alpha 5.0 MeV, SV 0 to 10 um: `see.edep_mean` within 3 % of 1.6137 MeV.
+   R23 (proton, partial): proton 10.0 MeV, SV 0 to 100 um in a 300 um bulk: within 3 % of 0.8327 MeV.
+   R24 (alpha through layers): alpha 5.0 MeV, BEOL two G4_Si layers of 1.0 um and 2.0 um, SV from 2 um to 7 um
+   below the bulk top (path to the SV 5 um, through it 5 um): within 3 % of 0.8558 MeV.
+   R25 (tilt): alpha 5.0 MeV at 60 degrees, SV 0 to 5 um (path in the SV 10 um): within 3 % of 1.6137 MeV.
+   R26 (full absorption): alpha 5.0 MeV, SV 0 to 50 um (CSDA range 24.3 um): `see.edep_mean` within 1 % of
+   5.0 MeV and `see.p_above` at the threshold edge closest to 4.75 MeV at least 0.99.
+   R27 (honest error bars): R23 with seed 1 and seed 2: `see.edep_mean` within 4 sigma.
+   R28 (hadronic smoke test, no number gated): neutron 14 MeV, hadronic "ftfp_bert_hp", 300 um bulk, SV 0 to
+   100 um, 2000 events, histogram 0 to 20 MeV: status ok, no `see:em_only` flag, and at least one event above
+   0.1 MeV.
+   Why 3 %: ICRU 49 gives 2 to 5 % uncertainty for these stopping powers; Geant4 and the table should share it,
+   so 3 % leaves room for the Monte Carlo mean (straggling, delta electrons leaving the SV) while a slip in
+   thickness, density, direction or units (10 % and more) fails. Why 1 % for R26: energy is conserved; what may
+   be missing is backscatter and escaping delta electrons, well below 1 % for alphas.
+8. **Laptop install.** `tools/install_g4see.sh` creates a conda env `g4see` (conda-forge: geant4 11.2.2 and a
+   C++ compiler; it downloads several GB of Geant4 data once), downloads G4SEE at tag v1.0, builds it with
+   `geant4-config` (as `tools/geant4_track/build.sh` does; Geant4's CMake files ask for development headers the
+   conda packages do not ship) and installs `g4see` and `mergeHistograms` into that env. It does not touch
+   `process_rad` or `tcad`. Engine tests are skipped where G4SEE is not available.
+
+9. **Correction during implementation (17 Nov, before any acceptance run).** A8.4 said
+   `/SEE/scoring/setPrecision 10`. With 10 digits after the point a number is 16 characters wide and G4SEE
+   writes it into a 15-character column, so edge and count run together ("4.6620000000e-016.0000000000e+00",
+   seen on the trial case of 0b). The macro uses `/SEE/scoring/setPrecision 8` instead (9 significant digits,
+   counts exact up to 999 999 999, always a space between the columns). `see_si_slab` rounds its default
+   `high_MeV` to 12 significant digits, as the hub rounds job inputs, so the stored problem id equals the id of
+   the problem the library returns.
+10. **After the checker's report (17 Nov).** The checker wrote 283 tests from the text of A8 alone; 282 passed.
+    **All acceptance checks passed** (10 000 events, seed 1; sigma includes the binning term):
+    R22 1.61364 +- 0.00106 MeV against 1.6137 (-0.004 %); R23 0.83125 +- 0.00159 MeV against 0.8327 (-0.18 %);
+    R24 0.85598 +- 0.00083 MeV against 0.8558 (+0.02 %); R25 1.61603 +- 0.00126 MeV against 1.6137 (+0.14 %);
+    R26 4.99930 +- 0.00076 MeV against 5.0 (-0.01 %) and `see.p_above` at 4.75 MeV 1.00000; R27 seeds 1 and 2
+    differ by 0.38 sigma; R28 ok with 6 events above 0.1 MeV; R20 and R21 hold. The agreement is far inside the
+    3 % gates, as expected when Geant4 and the tables share ICRU 49 data (A8.6): it confirms the set-up, it says
+    nothing about the physics.
+    **Defect fixed:** a result with more counted events than N (an inconsistent result) made the `see.p_above`
+    uncertainty the square root of a negative number; the NaN stopped the store before the self-check could mark
+    it `check_failed`. p is now clipped to [0, 1]; the self-check then fails the result as A8.5 says.
+    **Clarifications:** `parse_histogram` takes the histogram file's path. `budget:statistical_and_binning` is
+    set on every result. `see.edep_std` has uncertainty 0 when every event is in one bin. One `"materials:"`
+    string lists all materials. The 0.13 % in A8.7 holds for removing the odd table rows; removing the even rows
+    changes R24 by -0.15 %.
+    **R28 is a smoke test whose outcome depends on the seed:** about 2 neutron interactions are expected in the SV
+    for 2000 events, so another seed can give none (roughly 15 %). It stays as written (seed 1).

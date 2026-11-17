@@ -144,8 +144,8 @@ def test_registry():
     from simws.engines.base import Capability
     # amended by the lead (contract A7.3): a third engine, rustbca, of the implant family
     assert engines.ENGINES == {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
-                               "rustbca": "simws.engines.rustbca_engine"}
-    assert engines.names() == ["charon", "devsim", "rustbca"]
+                               "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine"}
+    assert engines.names() == ["charon", "devsim", "g4see", "rustbca"]     # amended by the lead (A8.3)
     for n in DEVICE_ENGINES:
         mod = engines.module(n)
         assert isinstance(engines.capability(n), Capability)
@@ -245,8 +245,9 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
     from simws.engines.planner import plan
     p = charon_problem()
     pl = plan(p)
-    assert list(pl.refused) == ["rustbca"]             # amended by the lead (A7.3): another problem family
-    assert len(pl.refused["rustbca"]) == 1 and pl.refused["rustbca"][0].startswith("problem kind:")
+    # amended by the lead (A7.3, A8.3): engines of the other problem families are refused, one reason each
+    assert sorted(pl.refused) == ["g4see", "rustbca"]
+    assert all(len(r) == 1 and r[0].startswith("problem kind:") for r in pl.refused.values())
     assert pl.primary == "devsim" and pl.checkers == ["charon"]
     assert pl.warnings == {}                            # 300 K is inside both tested ranges
     pc = plan(p, prefer=("charon",))
@@ -258,8 +259,9 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
 def test_plan_warnings_only_non_empty(charon_problem):
     from simws.engines.planner import plan
     pl = plan(charon_problem(T=77.0))                   # inside Charon's [77, 300], outside DEVSIM's [250, 400]
-    assert list(pl.refused) == ["rustbca"]             # amended by the lead (A7.3): another problem family
-    assert len(pl.refused["rustbca"]) == 1 and pl.refused["rustbca"][0].startswith("problem kind:")
+    # amended by the lead (A7.3, A8.3): engines of the other problem families are refused, one reason each
+    assert sorted(pl.refused) == ["g4see", "rustbca"]
+    assert all(len(r) == 1 and r[0].startswith("problem kind:") for r in pl.refused.values())
     assert list(pl.warnings) == ["devsim"]
 
 

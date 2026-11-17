@@ -7,11 +7,14 @@ engine-bound builder, so a translator can be checked against the legacy result:
     npn_hbt_2d()    <->  simws.tcad.hbt.build / gummel                  (flagship A, non-cryogenic settings)
 
 implant_si() is the first entry of the second problem family (contract A7): an ion implant into silicon.
+see_si_slab() is the first entry of the third (contract A8): a particle into a silicon block with a sensitive volume.
 """
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
+from simws.spec.see import (BeolLayer, EdepHistogram, SeeGeometry, SeePhysics, SeeProblem, SeeSource,
+                             SeeStatistics)
 from simws.spec.implant import Atom, Beam, ImplantProblem, Layer, Statistics, Target
 from simws.spec.schema import (Box, Contact, DCSweep, DeviceSpec, DopingTerm, Equilibrium, GradeTerm, MeshHints,
                                ModelSpec, Numerics, Problem, Region, Track)
@@ -134,3 +137,25 @@ def implant_si(ion: str = "P", energy_keV: float = 100.0, tilt_deg: float = 0.0,
     target = Target(atoms=[si], layers=[Layer(name="si", thickness_um=float(thickness_um),
                                               density_cm3={"Si": SI_DENSITY_CM3})])
     return ImplantProblem(beam=beam, target=target, statistics=Statistics(n_ions=int(n_ions), seed=int(seed)))
+
+
+# ---------------------------------------------------------------------------------------- single-event deposition
+def see_si_slab(particle: str = "alpha", energy_MeV: float = 5.0, sv_thickness_um: float = 10.0,
+                sv_depth_um: float = 0.0, bulk_thickness_um: float = 100.0, width_um: float = 1000.0,
+                tilt_deg: float = 0.0, beol=None, ion_Z: Optional[int] = None, ion_A: Optional[int] = None,
+                hadronic: str = "none", n_events: int = 10000, seed: int = 1, bins: int = 2000,
+                high_MeV: Optional[float] = None) -> SeeProblem:
+    """A particle into a silicon block (Geant4 "G4_Si") with a sensitive volume as wide as the block (contract A8.2).
+    beol: list of (name, material, thickness_um), the beam side first. The histogram is linear from 0 to high_MeV
+    (default 1.05 x energy_MeV). Only Geant4's own material data are used: the library adds no numbers of its own."""
+    geo = SeeGeometry(bulk_material="G4_Si", bulk_width_um=float(width_um), bulk_thickness_um=float(bulk_thickness_um),
+                      sv_depth_um=float(sv_depth_um), sv_width_um=(float(width_um), float(width_um)),
+                      sv_thickness_um=float(sv_thickness_um),
+                      beol=[BeolLayer(name=n, material=m, thickness_um=float(t)) for n, m, t in (beol or [])])
+    # rounded to 12 significant digits as the hub rounds job inputs, so the stored problem id is this problem's id
+    hi = float(high_MeV) if high_MeV is not None else float(f"{1.05 * float(energy_MeV):.12g}")
+    return SeeProblem(source=SeeSource(particle=particle, ion_Z=ion_Z, ion_A=ion_A, energy_MeV=float(energy_MeV),
+                                       tilt_deg=float(tilt_deg)),
+                      geometry=geo, physics=SeePhysics(hadronic=hadronic),
+                      histogram=EdepHistogram(scale="lin", bins=int(bins), low_MeV=0.0, high_MeV=hi),
+                      statistics=SeeStatistics(n_events=int(n_events), seed=int(seed)))

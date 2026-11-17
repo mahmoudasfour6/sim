@@ -182,3 +182,70 @@ class ImplantCapability(BaseModel):
         if self.tested_ion_symbols and ion not in self.tested_ion_symbols:
             out.append(f"ion: {_fmt(ion)} not in tested {sorted(self.tested_ion_symbols)}")
         return out
+
+
+# ---------------------------------------------------------------------------------- single-event deposition (A8)
+class SeeResult(BaseModel):
+    """Engine-neutral result of a SeeProblem (contract A8.3): the histogram of the energy each event left in the SV."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    problem_id: str
+    n_events: int
+    edges_MeV: List[float]                         # bins + 1, increasing, from the description
+    counts: List[float]                            # events with edges[i] <= Edep < edges[i+1]
+    underflow: float                               # Edep < low_MeV
+    overflow: float                                # Edep >= high_MeV
+    flags: List[str] = []
+    diagnostics: Dict[str, Any] = {}
+
+
+class SeeCapability(BaseModel):
+    """What a single-event engine's translator can run. Every list holds the ALLOWED values."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    env: str
+    description: str
+    in_process: bool
+    particles: List[str]
+    em: List[str]
+    hadronic: List[str]
+    max_beol_layers: int
+    tested_particles: List[str]
+    tested_energy_MeV: Tuple[float, float]
+    tested_materials: List[str]
+    tested_em: List[str]
+    tested_hadronic: List[str]
+    notes: str = ""
+
+    def unsupported(self, problem) -> List[str]:
+        out: List[str] = []
+
+        def check(field: str, value: Any, allowed: List[Any]) -> None:
+            if value not in allowed:
+                out.append(f"{field}: {_fmt(value)} not in {_fmt(list(allowed))}")
+
+        check("particles", problem.source.particle, self.particles)
+        check("em", problem.physics.em, self.em)
+        check("hadronic", problem.physics.hadronic, self.hadronic)
+        if len(problem.geometry.beol) > self.max_beol_layers:
+            out.append(f"max_beol_layers: {len(problem.geometry.beol)} > {self.max_beol_layers}")
+        return out
+
+    def outside_tested_range(self, problem) -> List[str]:
+        out: List[str] = []
+        if problem.source.particle not in self.tested_particles:
+            out.append(f"particle: {_fmt(problem.source.particle)} not in tested {self.tested_particles}")
+        lo, hi = self.tested_energy_MeV
+        e = problem.source.energy_MeV
+        if not lo <= e <= hi:
+            out.append(f"energy_MeV: {e:g} outside tested [{lo:g}, {hi:g}]")
+        mats = sorted({problem.geometry.bulk_material} | {b.material for b in problem.geometry.beol})
+        if any(m not in self.tested_materials for m in mats):
+            out.append(f"materials: {mats} not all in tested {self.tested_materials}")
+        if problem.physics.em not in self.tested_em:
+            out.append(f"em: {_fmt(problem.physics.em)} not in tested {self.tested_em}")
+        if problem.physics.hadronic not in self.tested_hadronic:
+            out.append(f"hadronic: {_fmt(problem.physics.hadronic)} not in tested {self.tested_hadronic}")
+        return out
