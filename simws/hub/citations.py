@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import Dict, Iterable, List
 
 REGISTRY: Dict[str, dict] = {
+    # DOI as printed in the RustBCA README; volume, number and year from the JOSS record were not re-checked
+    "drobny2021": dict(type="article", author="J. T. Drobny and D. Curreli",
+                       title="RustBCA: A High-Performance Binary-Collision-Approximation Code for Ion-Material Interactions",
+                       journal="Journal of Open Source Software", volume="6", number="64", pages="3298", year="2021",
+                       doi="10.21105/joss.03298", checked=False),
     "devsim": dict(type="article", author="J. E. Sanchez", title="DEVSIM: A TCAD Semiconductor Device Simulator",
                    journal="Journal of Open Source Software", volume="7", number="70", pages="3898", year="2022",
                    doi="10.21105/joss.03898", checked=False),

@@ -136,12 +136,17 @@ def test_outside_tested_range():
 
 
 # ------------------------------------------------------------------------------------------------ registry
+DEVICE_ENGINES = ["charon", "devsim"]       # contract A7.3: rustbca solves implant problems, not device problems
+
+
 def test_registry():
     from simws import engines
     from simws.engines.base import Capability
-    assert engines.ENGINES == {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine"}
-    assert engines.names() == ["charon", "devsim"]
-    for n in engines.names():
+    # amended by the lead (contract A7.3): a third engine, rustbca, of the implant family
+    assert engines.ENGINES == {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
+                               "rustbca": "simws.engines.rustbca_engine"}
+    assert engines.names() == ["charon", "devsim", "rustbca"]
+    for n in DEVICE_ENGINES:
         mod = engines.module(n)
         assert isinstance(engines.capability(n), Capability)
         assert engines.capability(n) is mod.CAPABILITY or engines.capability(n) == mod.CAPABILITY
@@ -160,7 +165,7 @@ def test_registry():
 
 def test_engine_unsupported_includes_capability_reasons():
     from simws import engines
-    for n in engines.names():
+    for n in DEVICE_ENGINES:                            # amended by the lead (A7.3): device engines only
         p = npn_hbt_2d()
         cap_r = engines.capability(n).unsupported(p)
         mod_r = engines.unsupported(n, p)
@@ -240,7 +245,8 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
     from simws.engines.planner import plan
     p = charon_problem()
     pl = plan(p)
-    assert pl.refused == {}
+    assert list(pl.refused) == ["rustbca"]             # amended by the lead (A7.3): another problem family
+    assert len(pl.refused["rustbca"]) == 1 and pl.refused["rustbca"][0].startswith("problem kind:")
     assert pl.primary == "devsim" and pl.checkers == ["charon"]
     assert pl.warnings == {}                            # 300 K is inside both tested ranges
     pc = plan(p, prefer=("charon",))
@@ -252,7 +258,8 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
 def test_plan_warnings_only_non_empty(charon_problem):
     from simws.engines.planner import plan
     pl = plan(charon_problem(T=77.0))                   # inside Charon's [77, 300], outside DEVSIM's [250, 400]
-    assert pl.refused == {}
+    assert list(pl.refused) == ["rustbca"]             # amended by the lead (A7.3): another problem family
+    assert len(pl.refused["rustbca"]) == 1 and pl.refused["rustbca"][0].startswith("problem kind:")
     assert list(pl.warnings) == ["devsim"]
 
 

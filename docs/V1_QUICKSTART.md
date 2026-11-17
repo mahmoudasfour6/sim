@@ -67,10 +67,46 @@ because currents are exponential in bias.
 `in_range` is False when the result is outside what its engine or models were tested for. `measured.ingest` refuses
 data without a source.
 
+## Ion implantation (second problem family, engine RustBCA)
+
+An implant is described the same way as a device, with its own description class: a beam, a layered target, and
+how many ions to follow. It needs the RustBCA engine once: `bash tools/install_rustbca.sh` (it compiles RustBCA
+and adds one package to the `tcad` env; it needs a Rust compiler and tells you how to get one).
+
+```python
+from simws.spec.library import implant_si
+from simws.engines.planner import plan
+from simws.study import Study
+
+p = implant_si("P", energy_keV=100, tilt_deg=7, dose_cm2=1e15)     # 31P into amorphous silicon
+print(plan(p).summary())                                           # rustbca runs it; the device engines refuse
+sr = Study(hub, p).sweep({"beam.energy_keV": [50.0, 100.0, 150.0]})
+print(sr.table("implant.Rp"))
+r = hub.result(sr.points[0]["result_id"])
+r.q("implant.Rp"), r.q("implant.dRp"), r.q("implant.lateral_straggle")     # metres, each with its error bar
+r.q("implant.profile")            # stopping probability per ion and per metre, on the axis "depth"
+r.q("implant.concentration")      # atoms per m^3 for the dose given (as implanted, before any anneal)
+```
+
+`python tools/v1_implant_demo.py` runs boron, phosphorus and arsenic at 50 and 100 keV and prints the table.
+
+What to keep in mind when reading an implant result:
+
+- The error bars are counting statistics only (flag `budget:statistical_only`). They do not cover the collision
+  physics.
+- The target is amorphous: no channeling. A crystalline wafer shows a deeper tail than this gives.
+- **Phosphorus** ranges are 13 to 18 % deeper than the published 1975 range tables (gate 25 %). **Boron ranges
+  come out about 35 % too deep**: this failed its acceptance check and is recorded as a FAIL (contract A7.9);
+  boron results carry the flag `implant:known_failure:`. Arsenic has not been checked against anything. Boron
+  and arsenic results are flagged `extrapolated:` and `in_range` is False: use them for trends, not for numbers.
+- Every implant result is `unverified`: there is no second implant engine yet to compare with.
+- No damage or vacancy profiles yet, and no beams above 25 keV per nucleon.
+
 ## What is not in v1
 
-- Charon: the translator writes its input decks, but running Charon and reading its output has never been executed.
-  First test: `tools/v1_charon_check.py` on the laptop.
-- DEVSIM translator limits: one silicon region (with Ge grading), ohmic contacts, equilibrium and DC sweeps. AC,
-  noise, strikes, Schottky contacts, MOS, SiC and mesh error bars are still only in the legacy modules.
+- DEVSIM translator limits: one silicon region (with Ge grading), ohmic contacts; equilibrium, DC sweeps and
+  two-port small-signal analysis. Noise, strikes, Schottky contacts, MOS and SiC are still only in the legacy
+  modules. Mesh error bars exist for DC results, not for AC.
+- Charon runs one case: the 1D abrupt pn diode.
+- Implantation: see the limits above.
 - The 23 workflow scripts that bypass the hub are unchanged.

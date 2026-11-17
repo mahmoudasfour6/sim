@@ -1,4 +1,4 @@
-"""Small parameter-study layer over the planner, the device adapters and compare (architecture v1, section 6.5).
+"""Small parameter-study layer over the planner, the engine adapters (device.*, implant.*) and compare (architecture v1, section 6.5).
 
     st = Study(hub, problem)                                   # engines=None -> [plan(problem).primary]
     r = st.sweep({"models.temperature_K": [250, 300, 350]})   # full factorial, last key varies fastest
@@ -115,7 +115,7 @@ class Study:
                 if reasons:
                     pt.update(status="refused", reasons=list(reasons))
                 else:
-                    res = self.hub.submit(f"device.{eng}", params={"problem": p.model_dump(mode="json")},
+                    res = self.hub.submit(E.adapter_name(eng), params={"problem": p.model_dump(mode="json")},
                                           fidelity=self.fidelity)
                     pt.update(status=res.status, result_id=res.id or None,
                               reasons=[res.message] if (res.status != "ok" and res.message) else [])

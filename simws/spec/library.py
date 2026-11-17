@@ -5,11 +5,14 @@ engine-bound builder, so a translator can be checked against the legacy result:
 
     pn_diode_1d()   <->  simws.validation.engine_pairs._devsim_diode   (the DEVSIM/Solcore pair problem)
     npn_hbt_2d()    <->  simws.tcad.hbt.build / gummel                  (flagship A, non-cryogenic settings)
+
+implant_si() is the first entry of the second problem family (contract A7): an ion implant into silicon.
 """
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
+from simws.spec.implant import Atom, Beam, ImplantProblem, Layer, Statistics, Target
 from simws.spec.schema import (Box, Contact, DCSweep, DeviceSpec, DopingTerm, Equilibrium, GradeTerm, MeshHints,
                                ModelSpec, Numerics, Problem, Region, Track)
 
@@ -100,3 +103,34 @@ def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t
                            tracking=[Track(contact="collector", offset_V=float(VCB), step_V=0.1)])
     return Problem(device=dev, models=models, analysis=analysis,
                    numerics=Numerics(relative_error=1e-8, absolute_error=1e10, max_iterations=40))
+
+
+# ---------------------------------------------------------------------------------------------- implantation
+# Contract A7.2: every value with its source (project rule 1).
+#   isotope masses    AME2020 atomic mass evaluation (Wang et al., Chinese Physics C 45, 030003, 2021), rounded
+#   silicon mass      IUPAC standard atomic weight (abridged, 2021)
+#   silicon density   8 atoms per cubic cell of edge 0.5431020511 nm (CODATA 2018 lattice parameter of silicon)
+#   silicon surface binding, cutoff, bulk binding
+#                     RustBCA 3.0.0 example table scripts/materials.py ("example input values only")
+#   the ion's cutoff (the silicon cutoff) and surface binding (none): a modelling choice, not data; acceptance
+#                     check R14 shows the range does not depend on it
+IMPLANT_IONS = {"B": (5, 11.009305), "P": (15, 30.973762), "As": (33, 74.921595)}       # symbol: (Z, isotope mass)
+SI_MASS_AMU = 28.085
+SI_DENSITY_CM3 = 4.994e22
+SI_SURFACE_BINDING_EV, SI_CUTOFF_EV, SI_BULK_BINDING_EV = 4.72, 1.5, 0.0
+
+
+def implant_si(ion: str = "P", energy_keV: float = 100.0, tilt_deg: float = 0.0, dose_cm2: Optional[float] = None,
+               thickness_um: float = 2.0, n_ions: int = 20000, seed: int = 1) -> ImplantProblem:
+    """An ion implant into one layer ("si") of amorphous silicon. ion: "B" (11B), "P" (31P) or "As" (75As).
+    Amorphous means no channeling: a crystalline wafer shows a deeper tail than this description can give."""
+    if ion not in IMPLANT_IONS:
+        raise ValueError(f"unknown ion '{ion}'; known ions: {sorted(IMPLANT_IONS)}")
+    Z, m = IMPLANT_IONS[ion]
+    beam = Beam(ion=Atom(symbol=ion, Z=Z, mass_amu=m, cutoff_eV=SI_CUTOFF_EV, surface_binding_eV=0.0),
+                energy_keV=float(energy_keV), tilt_deg=float(tilt_deg), dose_cm2=dose_cm2)
+    si = Atom(symbol="Si", Z=14, mass_amu=SI_MASS_AMU, cutoff_eV=SI_CUTOFF_EV,
+              surface_binding_eV=SI_SURFACE_BINDING_EV, bulk_binding_eV=SI_BULK_BINDING_EV)
+    target = Target(atoms=[si], layers=[Layer(name="si", thickness_um=float(thickness_um),
+                                              density_cm3={"Si": SI_DENSITY_CM3})])
+    return ImplantProblem(beam=beam, target=target, statistics=Statistics(n_ions=int(n_ions), seed=int(seed)))

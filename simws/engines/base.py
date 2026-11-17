@@ -111,3 +111,74 @@ class Capability(BaseModel):
         if lo <= t <= hi:
             return []
         return [f"temperature_K: {t:g} outside tested [{lo:g}, {hi:g}]"]
+
+
+# ---------------------------------------------------------------------------------------------- implantation
+class ImplantResult(BaseModel):
+    """Engine-neutral result of an ImplantProblem (contract A7.3): where every implanted ion came to rest."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    problem_id: str
+    n_ions: int
+    n_reflected: int                               # left through the front surface
+    n_transmitted: int                             # left through the back of the last layer
+    depth_um: List[float]                          # one per implanted ion, in launch order: depth below the surface
+    lateral_um: List[float]                        # same ions: displacement from the entry point along the axis
+    #                                                perpendicular to the plane of incidence
+    flags: List[str] = []
+    diagnostics: Dict[str, Any] = {}               # JSON-serialisable only
+
+
+class ImplantCapability(BaseModel):
+    """What an implant engine's translator can run. Every list holds the ALLOWED values."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    env: str
+    description: str
+    in_process: bool
+    structures: List[str]
+    potentials: List[str]
+    electronic_stopping: List[str]
+    recoils: List[bool]
+    max_layers: int
+    max_keV_per_amu: float                         # beam energy / ion mass above this is refused
+    tested_keV_per_amu: Tuple[float, float]        # runs outside are flagged, not refused
+    tested_target_symbols: List[str]
+    tested_ion_symbols: List[str] = []             # A7.9: ions the acceptance checks passed for (empty: any ion)
+    notes: str = ""
+
+    def unsupported(self, problem) -> List[str]:
+        """One reason per violated field, each starting with the field name. Empty list = supported."""
+        out: List[str] = []
+
+        def check(field: str, value: Any, allowed: List[Any]) -> None:
+            if value not in allowed:
+                out.append(f"{field}: {_fmt(value)} not in {_fmt(list(allowed))}")
+
+        check("structures", problem.target.structure, self.structures)
+        check("potentials", problem.models.potential, self.potentials)
+        check("electronic_stopping", problem.models.electronic_stopping, self.electronic_stopping)
+        check("recoils", problem.models.recoils, self.recoils)
+        if len(problem.target.layers) > self.max_layers:
+            out.append(f"max_layers: {len(problem.target.layers)} > {self.max_layers}")
+        e = problem.beam.energy_keV / problem.beam.ion.mass_amu
+        if e > self.max_keV_per_amu:
+            out.append(f"max_keV_per_amu: {e:.4g} keV/amu > {self.max_keV_per_amu:g}")
+        return out
+
+    def outside_tested_range(self, problem) -> List[str]:
+        """Strings for what lies outside the range the acceptance checks covered (bounds included); [] inside."""
+        out: List[str] = []
+        lo, hi = self.tested_keV_per_amu
+        e = problem.beam.energy_keV / problem.beam.ion.mass_amu
+        if not lo <= e <= hi:
+            out.append(f"energy_keV_per_amu: {e:.4g} outside tested [{lo:g}, {hi:g}]")
+        syms = sorted({s for la in problem.target.layers for s in la.density_cm3})
+        if any(s not in self.tested_target_symbols for s in syms):
+            out.append(f"target: {syms} not all in tested {sorted(self.tested_target_symbols)}")
+        ion = problem.beam.ion.symbol
+        if self.tested_ion_symbols and ion not in self.tested_ion_symbols:
+            out.append(f"ion: {_fmt(ion)} not in tested {sorted(self.tested_ion_symbols)}")
+        return out

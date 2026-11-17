@@ -680,3 +680,261 @@ two-port small-signal analysis to the description; the legacy code is unchanged 
    Clarifications: an empty `bias` list is allowed (zero bias); with one frequency there is no `ac.fT` and no
    `"ac:no_rolloff"` flag; the self-check of a small-signal result is the Kirchhoff sum of the operating-point
    currents; the mesh-study refusal happens before the engine runs; `Bias` takes keyword arguments.
+
+### A7 (16 Nov 2026, lead): ion implantation as a second problem family; first engine RustBCA
+
+Everything before A7 describes one family of problems: a device with contacts, solved for currents. Ion
+implantation is a different question (a beam and a layered target in, a depth profile out), so it gets its own
+description and result type next to the device ones. The hub, the store, trust, compare, the catalogue and the
+study layer are shared. Owner's instruction for new engines: A5.0.
+
+0. **What the lead had already seen when this was written (so the reader can judge the tolerances below).**
+   (a) Scouting, 16 Nov: RustBCA 3.0.0, 5000 P ions at 100 keV into Si with recoil tracking, Kr-C potential and
+   placeholder binding energies gave Rp = 138.3 nm and dRp = 50.9 nm. (b) An interface trial, 16 Nov: 300 As ions
+   at 80 keV, only to learn the input format and the timing (0.03 s without recoils; the same seed gives identical
+   output). (c) The same trial with recoil tracking switched on was killed by the operating system for memory.
+   No case of R16 below had been run. Because of (a), P at 100 keV is reported but is not a gate.
+1. **Description (`simws/spec/implant.py`, exported from `simws.spec`; nothing in the device description
+   changes, and no existing problem id changes).** Units in the field names. All classes forbid unknown fields.
+
+   ```python
+   class Atom(_M):
+       symbol: str                        # element symbol, e.g. "P"; not empty
+       Z: int                             # 1 .. 118
+       mass_amu: float                    # > 0 (for an implanted ion: the isotope mass)
+       cutoff_eV: float                   # > 0: a moving atom slower than this counts as stopped
+       surface_binding_eV: float = 0.0    # >= 0
+       bulk_binding_eV: float = 0.0       # >= 0
+
+   class Layer(_M):
+       name: str
+       thickness_um: float                # > 0
+       density_cm3: Dict[str, float]      # symbol -> atoms per cm^3; at least one entry, every value > 0
+
+   class Target(_M):
+       atoms: List[Atom]                  # at least one; symbols unique
+       layers: List[Layer]                # at least one; the beam side first; names unique
+       structure: Literal["amorphous"] = "amorphous"
+       # every symbol used in a layer must be in `atoms`; property thickness_um = sum of the layers
+
+   class Beam(_M):
+       ion: Atom
+       energy_keV: float                  # > 0
+       tilt_deg: float = 0.0              # 0 <= tilt < 90, measured from the surface normal
+       dose_cm2: Optional[float] = None   # > 0 when given
+
+   class ImplantModels(_M):
+       potential: Literal["zbl", "kr_c", "moliere"] = "zbl"
+       electronic_stopping: Literal["lindhard_scharff"] = "lindhard_scharff"
+       recoils: bool = False              # follow the target atoms that are knocked on (needed for damage)
+
+   class Statistics(_M):
+       n_ions: int = 20000                # 100 <= n_ions <= 2_000_000
+       seed: int = 1                      # >= 0
+
+   class ImplantProblem(_M):
+       spec_version: str = "1.0"
+       kind: Literal["implant"] = "implant"
+       beam: Beam
+       target: Target
+       models: ImplantModels = ImplantModels()
+       statistics: Statistics = Statistics()
+       depth_bin_um: float = 0.005        # > 0; target thickness / depth_bin_um must not exceed 5000
+       def problem_id(self) -> str: ...                 # same recipe as Problem.problem_id
+       def with_changes(self, changes) -> "ImplantProblem": ...   # dotted paths, validated again
+   ```
+
+   Every violated rule above raises pydantic's `ValidationError` (a `ValueError`).
+   `simws.spec.family(problem)` returns `"implant"` for an `ImplantProblem` and `"device"` for a `Problem`.
+2. **Library (`simws.spec.library.implant_si`).**
+   `implant_si(ion="P", energy_keV=100.0, tilt_deg=0.0, dose_cm2=None, thickness_um=2.0, n_ions=20000, seed=1)`
+   returns an `ImplantProblem`: one layer named "si" of amorphous silicon. `ion` is "B", "P" or "As"; anything
+   else raises `ValueError` naming the known ions. Parameters and where they come from (project rule 1):
+
+   | value | source |
+   |---|---|
+   | isotope masses: 11B 11.009305, 31P 30.973762, 75As 74.921595 amu | AME2020 atomic mass evaluation (Wang et al., Chinese Physics C 45, 030003, 2021), rounded |
+   | silicon mass 28.085 amu | IUPAC standard atomic weight (abridged, 2021) |
+   | silicon density 4.994e22 atoms/cm^3 | 8 atoms per cubic cell of edge 0.5431020511 nm (CODATA 2018 lattice parameter of silicon) |
+   | silicon surface binding 4.72 eV, cutoff 1.5 eV, bulk binding 0 eV | RustBCA 3.0.0 example table `scripts/materials.py`, which its authors label "example input values only" |
+   | the ion's cutoff 1.5 eV and surface binding 0 eV | **not data, a modelling choice**: the ion counts as stopped when slower than the silicon cutoff, and meets no barrier at the surface. R14 below checks that the range does not depend on it. |
+
+3. **Engine layer (`simws/engines/base.py`, additive).**
+
+   ```python
+   class ImplantResult(BaseModel):          # forbids unknown fields
+       engine: str
+       problem_id: str
+       n_ions: int
+       n_reflected: int                     # left through the front surface
+       n_transmitted: int                   # left through the back of the last layer
+       depth_um: List[float]                # one value per implanted ion, in launch order: depth below the front surface
+       lateral_um: List[float]              # same ions: displacement from the entry point along the axis
+                                            # perpendicular to the plane of incidence
+       flags: List[str] = []
+       diagnostics: Dict[str, Any] = {}
+
+   class ImplantCapability(BaseModel):      # forbids unknown fields; every list holds the ALLOWED values
+       engine: str
+       env: str
+       description: str
+       in_process: bool
+       structures: List[str]
+       potentials: List[str]
+       electronic_stopping: List[str]
+       recoils: List[bool]
+       max_layers: int
+       max_keV_per_amu: float               # beam energy / ion mass above this is refused
+       tested_keV_per_amu: Tuple[float, float]
+       tested_target_symbols: List[str]
+       notes: str = ""
+       def unsupported(self, problem) -> List[str]: ...
+       def outside_tested_range(self, problem) -> List[str]: ...
+   ```
+
+   `unsupported` returns one reason per violated field, each starting with the field name and a colon
+   (`"structures:"`, `"potentials:"`, `"electronic_stopping:"`, `"recoils:"`, `"max_layers:"`,
+   `"max_keV_per_amu:"`); empty when supported. `outside_tested_range` returns a string starting with
+   `"energy_keV_per_amu:"` when energy/mass is outside the tested interval (bounds included), and one starting
+   with `"target:"` when the target holds a symbol that is not in `tested_target_symbols`; else `[]`.
+   **Registry.** `ENGINES` gains `"rustbca": "simws.engines.rustbca_engine"`. An engine module may set
+   `FAMILY` ("device" when absent). `engines.family(name)` returns it; `engines.adapter_name(name)` returns
+   `"<family>.<name>"` (`"device.devsim"`, `"implant.rustbca"`). `engines.unsupported(name, problem)` returns
+   exactly one reason, starting with `"problem kind:"`, when the engine's family differs from
+   `simws.spec.family(problem)`, without calling the engine module's own check. So
+   `plan(implant_problem)` has primary "rustbca" with devsim and charon refused, and `plan(device_problem)`
+   lists rustbca under `refused`. `Study` submits to `engines.adapter_name(engine)`.
+4. **RustBCA translation (`simws/engines/rustbca_engine.py`; `FAMILY = "implant"`).** RustBCA 3.0.0 (Drobny and
+   Curreli, JOSS, doi 10.21105/joss.03298), built from source as the Python module `libRustBCA`, called in
+   process through `rustbca_local_py(input, "1D")`. Module functions: `available()`, `unsupported(problem)`,
+   `build_input(problem) -> dict` (pure Python: it does not import the engine) and
+   `run(problem, workdir) -> ImplantResult` (raises `EngineNotAvailable` when `libRustBCA` cannot be imported,
+   `Unsupported` when the capability refuses the problem).
+   Capability: structures ["amorphous"]; potentials ["zbl", "kr_c", "moliere"]; electronic_stopping
+   ["lindhard_scharff"]; recoils [False] (see 0c: following every recoil in memory is not safe on a laptop, so
+   damage profiles wait for a streaming path); max_layers 20; max_keV_per_amu 25.0 (RustBCA's README gives
+   25 keV per nucleon as the limit of its low-energy stopping models); tested_keV_per_amu (1.6, 9.1) and
+   tested_target_symbols ["Si"] (the cases of R16).
+   `build_input` returns the RustBCA input dictionary with these entries (others may be present):
+   `options`: `track_recoils` False, `electronic_stopping_mode` "LOW_ENERGY_NONLOCAL", `interaction_potential`
+   `[["ZBL"]]`, `[["KR_C"]]` or `[["MOLIERE"]]`, `scattering_integral` `[["MENDENHALL_WELLER"]]`,
+   `mean_free_path_model` "LIQUID", `seed` = statistics.seed, `num_chunks` 1;
+   `particle_parameters`: `length_unit` "MICRON", `energy_unit` "EV", `mass_unit` "AMU", `N` [n_ions], `Z`, `m`,
+   `Ec`, `Es` one-element lists from the ion, `E` [energy_keV x 1000], `pos` [[0, 0, 0]],
+   `dir` [[cos tilt, sin tilt, 0]];
+   `geometry_input`: `length_unit` "MICRON", `layer_thicknesses` in micrometres, `densities` one row per layer
+   and one column per entry of `target.atoms` (in that order) in atoms per cubic micrometre (cm^-3 x 1e-12, 0
+   for an absent species), `electronic_stopping_correction_factors` all 1.0;
+   `material_parameters`: `energy_unit` "EV", `mass_unit` "AMU", and `Z`, `m`, `Ec`, `Es`, `Eb` one entry per
+   target atom in the order of `target.atoms`.
+   x is depth, the plane of incidence is x-y, so `lateral_um` is RustBCA's z. An ion that left the target is
+   counted as transmitted when its last x is beyond half the target thickness, otherwise as reflected.
+   The number of threads comes from the environment variable `SIMWS_THREADS` (default: the smaller of 4 and the
+   number of cores); the result must not depend on it. Every result carries a flag starting with
+   `"implant:amorphous_target"` (no channeling: a crystalline wafer shows a deeper tail; no damage build-up, so
+   the profile is linear in dose).
+5. **Adapter `implant.rustbca`** (`simws/adapters/implant.py`: base `ImplantAdapter`, subclass
+   `ImplantRustbca`; manifest version "1.0", env "tcad", inputs ["problem"], citation "drobny2021"). It follows
+   the device adapter's rules: an invalid description is `invalid_input` raised from submit; a problem the
+   engine refuses is `invalid_input` with `"unsupported by rustbca: <reasons>"`; a missing engine is
+   `engine_error` saying it is not installed. With N = n_ions, k = number of implanted ions, x their depths:
+
+   | quantity | unit | value | standard uncertainty |
+   |---|---|---|---|
+   | `implant.Rp` | m | mean of x | s / sqrt(k) |
+   | `implant.dRp` | m | s = standard deviation of x (k-1 in the denominator) | (s/2) sqrt((m4/s^4 - (k-3)/(k-1)) / k), m4 = mean of (x - mean)^4 |
+   | `implant.lateral_straggle` | m | standard deviation of `lateral_um` (k-1) | same formula on the lateral values |
+   | `implant.fraction_implanted`, `implant.fraction_reflected`, `implant.fraction_transmitted` | dimensionless | count / N | sqrt(p(1-p)/N) with p = (count+1)/(N+2) |
+   | `implant.profile` | 1/m | count_i / (N b): stopping probability per ion and per metre of depth | sqrt(max(count_i, 1)) / (N b) |
+   | `implant.concentration` (only when `dose_cm2` is given) | 1/m**3 | dose x profile | dose x the profile's |
+
+   The profile axis is `{"name": "depth", "unit": "m"}` with the bin centres; bin width b = `depth_bin_um`;
+   the bins start at the surface and there are ceil(thickness / b) of them (so the sum of profile x b equals
+   `implant.fraction_implanted`). All but `implant.concentration` are declared outputs. Every quantity carries
+   the uncertainty component `"statistical"` equal to its sigma, and the result carries the flag
+   `"budget:statistical_only"` (the error bars are counting statistics; they say nothing about the potential or
+   the stopping model). Further rules:
+   fewer than 100 implanted ions: status `outside_validity`, message containing `"stopped in the target"`;
+   any transmitted ion: a flag starting with `"implant:transmitted:"`;
+   each `outside_tested_range` string s: the flag `"extrapolated:" + s`;
+   `verification["statistics"] = {"kind": "solution", "method": "split halves", "n_implanted": k,
+   "rp_halves_um": [a, b], "z": z, "passed": abs(z) <= 4.0}`, where a and b are the mean depths of the first
+   k//2 implanted ions and of the rest, and z is their difference over its standard error;
+   self-check (status `check_failed`): the three counts do not add up to N; `abs(z) > 4`; or paper fidelity with
+   k < 10000 (message containing `"paper fidelity needs at least 10000 implanted ions"`).
+6. **Limits, stated.** Amorphous targets only: no channeling. Static target: no damage build-up, no sputtering
+   of the surface during the implant, no annealing or diffusion afterwards, so the profile is the as-implanted
+   one and is linear in dose. Range profiles only: no vacancy or damage profile yet. Lindhard-Scharff stopping
+   only, so beams above 25 keV per nucleon are refused. **Trust:** an implant result stays "unverified" until a
+   second, different implant engine is connected and compared; the table check R16 is acceptance evidence for
+   the translation, it is not a verification of the physics and not a validation.
+7. **Acceptance (tolerances fixed here, before any of these runs).** Library problems with their defaults
+   (20 000 ions, seed 1, ZBL) unless stated. "Within 4 sigma" means: the difference is at most 4 times the root
+   sum of squares of the two standard uncertainties the adapter reports.
+   R10 (repeatability): `implant_si("P", 50, n_ions=2000)` run twice gives identical `depth_um`; with seed 2 it
+   differs; with `SIMWS_THREADS=1` it is identical to the default thread count.
+   R11 (counting): in every run implanted + reflected + transmitted = N. A 0.05 um target under P at 100 keV
+   (n_ions=2000) has transmitted ions and the adapter flags it; a 0.005 um target gives `outside_validity`.
+   R12 (honest error bars): `implant_si("P", 50)` with seed 1 and with seed 2: `implant.Rp`, `implant.dRp` and
+   `implant.lateral_straggle` each agree within 4 sigma.
+   R13 (layers): the same problem with the target written as two silicon layers, 0.03 um and 1.97 um, agrees
+   with the one-layer result in `implant.Rp` and `implant.dRp` within 4 sigma.
+   R14 (the ion's modelling choice): the same problem with the ion's `cutoff_eV` = 5.0 and
+   `surface_binding_eV` = 3.0 agrees with the default in `implant.Rp` and `implant.dRp` within 4 sigma.
+   R15 (trends; signs and one band): Rp(P, 100 keV) > Rp(P, 50 keV); at 50 keV Rp(B) > Rp(P) > Rp(As); and for
+   P at 50 keV the ratio Rp(tilt 60 degrees) / Rp(tilt 0) lies in [0.45, 0.60] (in an infinite amorphous medium
+   it is cos 60 = 0.5; the surface removes some shallow ions).
+   R16 (published range tables): Gibbons, Johnson and Mylroie, *Projected Range Statistics*, 2nd ed. (1975), as
+   reproduced in G. Chapman, Simon Fraser University ENSC 495 lecture 7
+   (https://www.sfu.ca/~gchapman/e495/e495l7o-2.pdf, read 16 Nov 2026). Rp / dRp in um: B 50 keV 0.1608 / 0.0504;
+   B 100 keV 0.2994 / 0.0710; P 50 keV 0.0607 / 0.0256. Gate: `implant.Rp` and `implant.dRp` each within 25 % of
+   the table value. Reported without a gate: P 100 keV 0.1238 / 0.0456 (see 0a).
+   Why 25 %: the tables are a 1975 transport theory (LSS), RustBCA is a Monte Carlo code with a different
+   potential, and codes of this kind are documented to miss measured ranges by up to 25 % (Titze et al., J. Vac.
+   Sci. Technol. A 39, 2021, doi 10.1116/6.0001406, antimony in silicon). A mistake in units, density or
+   geometry gives a factor of two or more, which this gate catches; a 10 % physics difference it does not.
+8. **Laptop install.** `tools/install_rustbca.sh` builds RustBCA at commit
+   51bee889956147e3287491d0c68957967235a33c (version 3.0.0) in a throw-away build environment and installs the
+   one resulting wheel into the `tcad` env without touching its other packages. It needs a Rust compiler
+   (`cargo`); when there is none it says how to get one and stops. Tests that need the engine are skipped where
+   `libRustBCA` is not installed.
+9. **After the checker's report (16 Nov).** The checker wrote 161 tests from the text of A7 alone; 158 passed.
+   R10, R12, R13, R14 and R15 passed (20 000 ions, seed 1, ZBL): two seeds agree in Rp, dRp and lateral straggle
+   within 0.4 sigma; a different ion cutoff and surface binding moves Rp by 0.02 sigma; the 60 degree tilt ratio
+   is 0.560. R16 for phosphorus passed: at 50 keV Rp 71.34 +- 0.21 nm against 60.7 (+17.5 %) and dRp 29.47 +- 0.13
+   nm against 25.6 (+15.1 %); at 100 keV (reported, no gate) Rp 139.81 nm (+12.9 %) and dRp 50.69 nm (+11.2 %).
+   **Recorded FAIL: R16 for boron.** At 50 keV Rp 216.1 nm against 160.8 (+34.4 %) and dRp 72.3 nm against 50.4
+   (+43.4 %); at 100 keV Rp 407.1 nm against 299.4 (+36.0 %) and dRp 107.2 nm against 71.0 (+51.0 %). The gate
+   is 25 % and is not changed; the two boron checks stay in the suite as expected failures.
+   It is not a translation error: the checker called RustBCA directly with an input written from A7.4, not from
+   `build_input`, and got the same ranges. *Post hoc diagnostics* (run after the result was seen, so they explain
+   and do not excuse): the choice of potential moves the boron range by 3 % (Kr-C +32 %, Moliere +36 %);
+   RustBCA's other low-energy stopping modes are further off (checker: local +64 %, equipartition +49 % at
+   50 keV); multiplying the electronic stopping by 1.6 brings boron at 100 keV to +1.7 % in Rp and -0.1 % in
+   dRp. So the cause is the Lindhard-Scharff electronic stopping, which is too weak for boron in silicon; for a
+   light ion at these energies electronic stopping decides the range, for phosphorus it does not.
+   **What it means for use:** RustBCA boron ranges in silicon are about 35 % too deep and must not be used as
+   numbers. No correction factor is applied: a factor needs a source (measured or tabulated stopping), and
+   fitting it to the same table that failed would be calibration presented as agreement.
+   **Changes made because of the FAIL (after the result, so listed here):**
+   (a) `ImplantCapability` gains `tested_ion_symbols: List[str] = []` (empty: any ion). `outside_tested_range`
+   returns a string starting with `"ion:"` when the list is not empty and the beam ion is not in it.
+   (b) The RustBCA capability now lists only what passed: `tested_keV_per_amu` (1.6, 3.3) and
+   `tested_ion_symbols` ["P"]. Boron and arsenic results therefore carry `extrapolated:` flags and
+   `in_range` False (arsenic is not known to be wrong; the source used for R16 has no arsenic table).
+   (c) A RustBCA result for boron into a target that holds silicon carries a flag starting with
+   `"implant:known_failure:"`.
+   **Corrections and clarifications (no tolerance involved):**
+   R11 as written by the lead was inconsistent: the 0.05 um target under P at 100 keV stops only 71 of 2000
+   ions, so the result is `outside_validity`, and the adapter raised before it set the transmitted flag. A7.5
+   says "any transmitted ion: a flag" without a condition, so the adapter now sets the flag first; it is present
+   on the `outside_validity` result too.
+   Split halves: z = (a - b) / sqrt(var_a/n_a + var_b/n_b), sample variances with n-1.
+   `implant.concentration` = `dose_cm2` x 1e4 (ions per m^2) x profile.
+   An ion exactly on a bin edge is counted in the deeper bin; the last bin takes anything at or beyond its end.
+   The RustBCA capability's `env` is "tcad". "The target holds a symbol" means: a symbol used in a layer.
+   A paper-fidelity run with at least 10 000 implanted ions is accepted like any other (status ok).
+   R13 with the same seed is bit-identical to the one-layer run, so it tests the layer bookkeeping only.
+   **Next for this engine, not done here:** an electronic-stopping correction per ion and target taken from a
+   source (the SRIM stopping tables the workspace can already read), with the range tables held out as the test;
+   a second implant engine, so that results can become "verified"; damage profiles through a streaming path.
