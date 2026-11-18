@@ -202,3 +202,14 @@ class DeviceCharon(DeviceAdapter):
         # no citation key yet: "charon" is not in simws.hub.citations, and a key that is not registered makes
         # citations.bibliography() raise. Add the checked reference there first, then cite it here.
         inputs=["problem"], outputs=_OUTPUTS, native_conventions=CUR, citations=[])
+
+
+class DeviceDevsimEb(DeviceAdapter):
+    """A11: the same Problem with an electron energy balance (different physics, same code as device.devsim)."""
+    ENGINE = "devsim_eb"
+    manifest = Manifest(
+        name="device.devsim_eb", version="1.0", env="tcad", engine="devsim_eb", engine_version="env-locked",
+        description="1D silicon Problems with an electron energy balance on DEVSIM (Baccarani-Wordeman 1985): "
+                    "a model-form check of drift-diffusion",
+        verification={"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"},
+        inputs=["problem"], outputs=_OUTPUTS, native_conventions=CUR, citations=["devsim"])

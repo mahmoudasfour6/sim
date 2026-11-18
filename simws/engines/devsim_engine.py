@@ -281,9 +281,12 @@ def build(problem: Problem) -> dict:
 
 
 # ------------------------------------------------------------------------------------------ run
-def run(problem: Problem, workdir: Optional[Path] = None) -> EngineResult:
+def run(problem: Problem, workdir: Optional[Path] = None, _post_build=None) -> EngineResult:
+    """_post_build(state): a hook run after the equilibrium solve (A11: devsim_eb adds the energy balance there)."""
     from simws.hub.adapter import NotConverged
     st = _build(problem)
+    if _post_build is not None:
+        _post_build(st)
     contacts = [c.name for c in problem.device.contacts]
     an = problem.analysis
     unit = "A/cm**2" if problem.device.dimension == 1 else "A/cm"

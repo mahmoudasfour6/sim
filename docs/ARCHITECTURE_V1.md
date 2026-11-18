@@ -1437,3 +1437,192 @@ Owner's instruction for new engines: A5.0 (and "lets go with ... ngspice + openv
     key = SHA-256 of (SHA-256 of the executable, a newline, the source). A transient without `max_step_s` uses
     `step_s` as the maximum step. `CircuitResult.axis_name` for dc is the description's source name; the
     adapter writes it in lower case. `problem_id` uses the same recipe as `Problem.problem_id`.
+12. **On the owner's laptop (18 Nov, update 7, commit cd6670f there).** The same acceptance numbers as on the
+    build machine for R30 to R35, R35b and R37, and R36 ran there (the IHP SG13G2 PDK is installed): peak beta
+    800.170 against the stored 800.17 (4.7e-7 relative, gate 1 %), V_BE at the point nearest 1 uA 0.6650 V
+    against 0.665 V (gate 0.0051 V). PASS: ngspice 47 with OSDI reproduces the legacy npn13G2 Gummel result of
+    the older ngspice, so the foundry model path carries over. Fast suite there: 1292 passed, 19 skipped,
+    3 xfailed.
+
+### A10 (18 Nov 2026, lead): single event to circuit; critical charge and upset probability
+
+The second link between families (the first is A9.6): the energy a particle leaves in a sensitive volume (A8)
+becomes a current pulse injected into a circuit node (A9); bisection over the pulse charge finds the critical
+charge of that node, and the single-event histogram gives the probability that one particle deposits at least
+that much. Owner's instruction: "lets do 1 and 2", 18 Nov (1 = this link).
+
+0. **What the lead had already seen.** Only closed-form numbers, computed from the formulas in 4 before any run:
+   the references of R42 to R44. No circuit or single-event run of any case below.
+1. **Module `simws/chain/see.py`.** Constants and functions:
+   `PAIR_ENERGY_SI_EV = 3.66`: mean energy per electron-hole pair in silicon, F. Scholze, H. Rabus, G. Ulm,
+   J. Appl. Phys. 84(5), 2926-2939, 1998, doi 10.1063/1.368398 (measured 3.66 +- 0.03 eV for photons of 50 to
+   1500 eV; the abstract states no temperature; used here as the room-temperature value).
+   `charge_C(edep_eV, pair_energy_eV=PAIR_ENERGY_SI_EV)` = edep_eV / pair_energy_eV x q (q = 1.602176634e-19 C)
+   and its inverse `edep_eV(charge_C, pair_energy_eV=...)`; both accept arrays.
+   `double_exponential(charge_C, tau_rise_s, tau_fall_s, delay_s=0.0, n_points=401) -> Pwl`: the current pulse
+   of G. C. Messenger, "Collection of charge on junction nodes from ion tracks", IEEE Trans. Nucl. Sci. 29(6),
+   2024-2031, 1982: I(t) = Q / (tau_f - tau_r) (exp(-(t - d) / tau_f) - exp(-(t - d) / tau_r)) for t >= d.
+   Rules (ValueError otherwise): charge > 0, 0 < tau_rise < tau_fall, delay >= 0, 50 <= n_points <= 5000.
+   Times t_j = d + 20 tau_f (j / (n - 1))^2, j = 0 .. n-1 (dense where the pulse is steep); values from the
+   formula, the last one set to 0, then all multiplied by one factor so that the trapezoidal integral of the
+   PWL equals Q to rounding. The time constants are inputs: they come from TCAD or measurement, never from
+   this module.
+   `inject(problem, node, pulse, polarity="discharge", name="set") -> CircuitProblem`: a copy of a transient
+   CircuitProblem with an isource `name` carrying `pulse` (DC 0); "discharge" puts it from `node` to "0" (it
+   removes charge from the node, as a strike collected at a node held high), "charge" from "0" to `node`;
+   `v(<node>)` is added to the probes when missing. ValueError when the analysis is not a transient, the node is
+   not in the circuit, or an element already has that name.
+   `critical_charge(hub, problem, node, threshold_V, tau_rise_s, tau_fall_s, q_low_C, q_high_C, delay_s=0.0,
+   polarity="discharge", rel_tol=1e-3, max_runs=60) -> dict`: an upset is the node voltage reaching the
+   threshold during the transient (discharge: the minimum of v(node) <= threshold; charge: the maximum >=
+   threshold). Each trial is a `circuit.ngspice` hub job of `inject(problem, node, double_exponential(q, ...))`.
+   It first runs q_low (must not upset) and q_high (must upset), else ValueError; then bisects until
+   (q_hi - q_lo) / q_hi <= rel_tol. Returns {"qcrit_C": (q_lo + q_hi) / 2, "q_lo_C", "q_hi_C", "runs",
+   "result_ids", "node", "threshold_V", "polarity", "tau_rise_s", "tau_fall_s"}. A failed hub job raises
+   RuntimeError with its message.
+   `upset_probability(see_result, qcrit, pair_energy_eV=PAIR_ENERGY_SI_EV) -> dict`: `see_result` is a stored
+   `see.*` result, `qcrit` the dict above. E_crit = edep_eV(qcrit_C); P = the result's `see.p_above` linearly
+   interpolated in the threshold at E_crit (the exact value when the events are spread evenly inside a bin);
+   P_low and P_high the same at edep_eV(q_hi_C) and edep_eV(q_lo_C); sigma = sqrt(p (1 - p) / N), p =
+   (P N + 1) / (N + 2), N the result's `n_events`. Returns {"P", "P_low", "P_high", "sigma", "E_crit_eV",
+   "n_events", "flags"}; flags hold `"upset:outside_histogram"` when E_crit is outside the histogram's range
+   (then P is 1 below it and the overflow fraction above it).
+2. **Limits, stated.** All charge generated in the SV is collected at one node (the SV model's assumption; no
+   funnelling, diffusion or collection efficiency); the pulse shape is the double exponential with given time
+   constants; the critical charge is for one node, one pulse shape and one threshold; P is per particle that
+   crosses the SV the way the single-event problem's source does (G4SEE's point source: always through the
+   SV's centre). A cross-section needs the fluence and area on top. Trust stays "unverified".
+3. **Tests by the checker** cover the functions above from this text (fake hub where useful).
+4. **Closed form used as reference (R42, R43).** A node held at Vdd through R with C to ground, the pulse
+   removing charge: C du/dt = I(t) - u / R for the droop u = Vdd - v. For the Messenger pulse with tau = R C:
+   u(t) = Q / (C (tau_f - tau_r)) [h(tau_f) - h(tau_r)], h(a) = a tau (exp(-t / tau) - exp(-t / a)) / (tau - a).
+5. **Acceptance (tolerances fixed here, before any run).** Circuit "rc_node(C, R)": vsource "vdd" 1.0 V on node
+   "vdd", resistor "r1" (vdd-n) R, capacitor "c1" (n-0) C, transient step 0.1 ps, stop 300 ps, max step 0.1 ps,
+   default numerics; pulse tau_r = 1 ps, tau_f = 10 ps, delay 0; threshold 0.5 V, discharge.
+   R40 (conversion): `charge_C(1e6)` equals 1e6 / 3.66 x 1.602176634e-19 C to 1e-12 relative (4.37753e-14 C),
+   and `edep_eV(charge_C(x))` returns x to 1e-12 relative.
+   R41 (pulse): for Q = 2 fC the PWL's trapezoidal integral equals Q to 1e-12 relative; its largest value is within
+   1 % of the analytic peak 1.548527e-4 A, at a time within 2 % of the analytic peak time 2.558428 ps.
+   R42 (charge reaches the node): rc_node(10 fF, 10 kOhm) with a 2 fC pulse: the minimum of v(n) is within 1 % of
+   the closed-form droop (closed form: 0.8452308 V, droop 0.1547692 V) of that droop.
+   R43 (critical charge): rc_node(10 fF, 10 kOhm), q_low 1 fC, q_high 20 fC: `qcrit_C` within 1 % of the closed form
+   6.461234e-15 C, and (q_hi - q_lo) / q_hi <= 1e-3.
+   R44 (end to end, needs G4SEE): `see_si_slab("alpha", 5.0, sv_thickness_um=10.0)` through `see.g4see`;
+   critical charges of rc_node(60 fF, 100 kOhm) (closed form 3.032237e-14 C; q_low 10 fC, q_high 100 fC) and
+   rc_node(200 fF, 100 kOhm) (closed form 1.003812e-13 C; q_low 50 fC, q_high 300 fC); then P >= 0.999 for the
+   first and P <= 0.001 for the second (the alphas leave about 1.61 MeV, 70.6 fC). Also P_low <= P <= P_high in
+   both.
+   Why these tolerances: R42 and R43 differ from the closed form by the PWL sampling of the pulse, the time
+   integration and the bisection (1e-3); 1 % leaves room for those and catches a wrong sign, unit or charge.
+   R44 checks the chain end to end against a case whose answer is not in doubt.
+6. **Amendment before any run (18 Nov, lead).** With 401 points the grid spacing near the pulse peak (t about
+   2.56 ps for tau_r = 1 ps, tau_f = 10 ps) is about 0.11 ps, so the PWL peak time could miss the analytic one by
+   up to about 2.2 %, more than R41 allows, by construction rather than by error. The default of
+   `double_exponential` becomes `n_points=2001` (spacing near the peak about 0.022 ps). Tolerances unchanged.
+
+### A11 (18 Nov 2026, lead): a different-physics device engine, electron energy balance in DEVSIM ("devsim_eb")
+
+Drift-diffusion assumes electrons are always at the lattice temperature. Where the field is strong they are not:
+they heat up, their mobility falls and, over short distances, their velocity overshoots. A second device engine
+that solves the same Problem with an electron energy balance says how much a drift-diffusion result depends on
+that assumption (model-form error). It runs on the same code (DEVSIM), so it is a different-physics check, never
+a verification. Owner's instruction: "lets do 1 and 2", 18 Nov (2 = a second engine for trust).
+
+0. **What the lead had already seen.** Nothing of this engine: no run of any kind. The silicon saturation velocity
+   that simws already uses (Canali 1975, `simws.tcad.physics.saturation_velocity`) is 1.07e7 cm/s for electrons
+   at 300 K.
+1. **Model (electrons; holes stay isothermal drift-diffusion).** Unknown: the electron temperature Tn (K) at each
+   node, with u = k Tn / q.
+   Current: J_n = q mu_n (grad(n u) - n grad(psi_c)), psi_c the electron band potential used by the
+   drift-diffusion translator (potential plus the band-gap-narrowing shift).
+   Energy flux: S_n = -(5/2) u J_n - kappa_n grad(Tn), kappa_n = (5/2) (k^2 / q) mu_n n Tn.
+   Energy balance (steady state): div(S_n) = J_n . E - W_n, W_n = (3/2) n k (Tn - T) / tau_w.
+   Relaxation times of G. Baccarani and M. R. Wordeman, "An investigation of steady-state velocity overshoot in
+   silicon", Solid-State Electron. 28, 407-416, 1985, without the kinetic-energy term (an energy-balance, not a
+   full hydrodynamic, model): mu_n = mu_0 T / Tn and tau_w = (3 k mu_0 / (2 q v_s^2)) T Tn / (T + Tn), so
+   W_n = n q v_s^2 (Tn^2 - T^2) / (mu_0 T Tn). mu_0 is the low-field mobility the drift-diffusion translator uses
+   at that node (constant or Masetti), v_s the saturation velocity above. No new parameter is introduced.
+   Consequence used for checking (homogeneous material, field E, no gradients): Tn = T sqrt(1 + (mu_0 E / v_s)^2)
+   and J_n = q n mu_0 E / sqrt(1 + (mu_0 E / v_s)^2) (the Caughey-Thomas form with beta = 2).
+   Left out, stated: the energy carried by recombining carriers, hole heating, impact ionization driven by Tn,
+   lattice heating.
+2. **Discretization.** On an edge from node 0 to node 1 (length h): u_e = (u_0 + u_1) / 2, Tn_e = (Tn_0 +
+   Tn_1) / 2, mu_e = (mu_0(node 0) + mu_0(node 1)) / 2 x T / Tn_e, delta = (psi_c,0 - psi_c,1) / u_e,
+   J = q mu_e / h (n_1 u_1 B(-delta) - n_0 u_0 B(delta)) (B the Bernoulli function; for Tn = T it is the
+   drift-diffusion translator's Scharfetter-Gummel current), S = -(5/2) u_e J - kappa_e (Tn_1 - Tn_0) / h with
+   kappa_e = (5/2) (k^2 / q) mu_e ((n_0 + n_1) / 2) Tn_e; J . E is assembled on the edge volume and W_n on the
+   node volume. Ohmic contacts hold Tn = T.
+3. **Engine `devsim_eb` (`simws/engines/devsim_eb_engine.py`, family "device", adapter "device.devsim_eb",
+   `CODE = "devsim"`).** It translates a Problem exactly as `devsim` does, solves the drift-diffusion equilibrium,
+   adds the energy balance, solves the equilibrium again, and then runs the analysis. Capability: dimensions [1];
+   materials ["silicon"]; no grading; contacts ["ohmic"]; statistics ["boltzmann"]; mobility ["constant",
+   "masetti"]; velocity_saturation [False] (the energy balance gives the field dependence; adding drift-diffusion
+   velocity saturation would count it twice); srh ["off", "constant", "scharfetter"]; auger [False, True];
+   band_gap_narrowing ["off", "slotboom"]; incomplete_ionization ["off"]; impact_ionization ["off"]; analyses
+   ["equilibrium", "dc_sweep"]; tested_temperature_K (300, 300); mesh_study True; env "tcad"; in_process True.
+   `EngineResult.diagnostics` adds "eb_vsat_n_cm_s" (the v_s used), "eb_Tn_max_K" (the largest Tn at the last
+   point) and "eb_model" ("baccarani_wordeman_1985_energy_balance"). Every result carries the flag
+   `"physics:energy_balance_electrons"`. Module function `profiles(problem) -> dict`: runs the problem and returns,
+   at its last point, {"x_um", "Tn_K", "n_cm3", "potential_V"} node by node (1D, increasing x).
+   The adapter `device.devsim_eb` (version "1.0") is `device.devsim`'s adapter with this engine (same quantities,
+   units, mesh study, flags). Library: `simws.spec.library.n_bar_1d(N_D_cm3=1e16, length_um=2.0, mu_n=1000.0,
+   mu_p=400.0, nodes=2001, T=300.0, V=None)`: uniform n-type silicon, contacts "left" (x_min) and "right"
+   (x_max), constant mobilities, SRH, Auger and band-gap narrowing off, Boltzmann statistics, uniform mesh; a dc
+   sweep of "right" over V (0.05 V steps) or equilibrium when V is None; numerics as `pn_diode_1d`.
+4. **Independence (amends A2.3).** An engine module may set `CODE` (its name when absent); `simws.engines.code(name)`
+   returns it. `compare_results` counts two results as independent only when their engines' codes differ, so a
+   comparison of `devsim` with `devsim_eb` never verifies either. Existing pairs are unchanged (devsim and charon
+   have different codes).
+5. **Acceptance (tolerances fixed here, before any run).**
+   R50 (equilibrium): `n_bar_1d()` and `pn_diode_1d()` at equilibrium through `devsim_eb`: max |Tn - T| / T <=
+   1e-6 over all nodes (from `profiles`) and every current below the A3 floor.
+   R51 (low-field limit): `n_bar_1d(V=[0.04])` (200 V/cm): the `devsim_eb` current within 1e-3 relative of the
+   `devsim` current of the same problem.
+   R52 (hot electrons, homogeneous): `n_bar_1d(V=[2.0, 6.0, 20.0])` swept to each value in turn (three problems
+   with V=[2.0], V=[6.0], V=[20.0]): at the node nearest the middle, with E the central-difference field there
+   and n the density there, Tn within 1 % of T sqrt(1 + (mu_0 E / v_s)^2) and the current density within 1 % of
+   q n mu_0 E / sqrt(1 + (mu_0 E / v_s)^2) (mu_0 = 1000 cm^2/Vs, v_s from the diagnostics).
+   R53 (mesh): `n_bar_1d(V=[6.0])` through `device.devsim_eb` at paper fidelity: the mesh error bar of
+   dc.I.right below 1 % of its value.
+   R54 (different-physics check, reported): `pn_diode_1d(V=[0.30, 0.35, ..., 0.60])` through `device.devsim` and
+   `device.devsim_eb`: the largest relative difference of dc.I.anode is printed, not gated; recorded with
+   `compare_results(..., tolerance=0.01)`, the comparison has independent False, and the trust level of the
+   `devsim` result is the same before and after it is recorded.
+   Why these tolerances: R50 and R51 are limits in which the two models agree exactly, so the gates sit just
+   above the solver tolerance; R52 compares with a closed form valid in the middle of a long bar (the energy
+   relaxation length, about v_s tau_w, is some 10 nm against 1 um to the contacts); 1 % allows the
+   discretization and catches a wrong factor in any term (a factor 5/2 or 3/2 misplaced changes Tn by more).
+7. **After the checker's report (18 Nov).** 61 tests written from A10 alone; 58 passed, then all after one fix.
+   **All acceptance checks passed:** R40 exact; R41 integral 2.2e-16, peak value 8.3e-7, peak time 1.8e-3
+   (2001 points); R42 minimum of v(n) 0.8452317 V, droop off by 5.7e-6 relative; R43 qcrit 6.462036e-15 C
+   (+1.2e-4) with a bracket of 7.2e-4 after 14 runs; R44 (10 000 alphas, mean deposit 1.61364 MeV = 70.64 fC):
+   P = 1.000000 for the 60 fF node (qcrit 3.0314e-14 C) and P = 0.000400 for the 200 fF node (qcrit
+   1.0038e-13 C), P_low <= P <= P_high in both.
+   **Defect fixed:** `upset_probability` set the outside-histogram flag when the bracket ends q_lo or q_hi fell
+   outside the histogram, not only E_crit; now only E_crit sets it (P_low and P_high keep their values: 1 below
+   the range, the overflow fraction above).
+   **Clarifications:** `see_result` is a stored result envelope (`hub.result(id)`), N its diagnostics'
+   `n_events`; between the last threshold and high_MeV, P is interpolated to the overflow fraction at
+   high_MeV; `critical_charge` raises ValueError when q_low_C >= q_high_C or the polarity is unknown, and
+   RuntimeError when max_runs is reached; node names and probes are case-insensitive. "About 1.61 MeV, 70.6 fC"
+   in R44 means the R22 deposit, 1.6137 MeV.
+6. **After the checker's report (18 Nov).** 46 tests written from A11 alone; 44 passed.
+   Passed: R50 (|Tn - T| and every current exactly 0 for the bar and the diode); R51 (1.7e-4 against 1e-3); R52 at
+   2 V (Tn 8.0e-6, current 5.7e-6 against 1e-2); R53 (mesh error bar 6.0e-7 of the current, `passed` True);
+   R54 (largest difference 0.22 % at 0.60 V, rising from 0.09 % at 0.30 V; independent False; the devsim result's
+   trust unchanged). Registry, capability, refusals, `profiles`, independence and the adapter as stated.
+   **Recorded FAIL: R52 at 6 V and 20 V.** Tn 909.97 K against 920.43 K (1.14 %) at 6 V; 2736.8 K against
+   2820.5 K (3.0 %) and the current 1.29 % off at 20 V. The gate is unchanged; both cases stay in the suite as
+   expected failures. *Post hoc diagnosis* (the checker's independent script, after the result): the solution is
+   self-consistent (rebuilt from the profiles, the discrete energy balance leaves a residual of 1e-10 of J.E), but
+   the bar is not homogeneous: electrons enter cold at the cathode, their mobility falls as they heat, and the
+   bar becomes space-charge limited (n = 1.06 N_D and 1.46 N_D in the middle; the field changes by 64 % and
+   142 % across it; the currents exceed q N_D v_s). R52's premise rested on the energy relaxation length alone
+   and missed this space-charge gradient. So the failure says the check was set up wrongly at those biases, not
+   that the model or code is wrong; the 2 V case, where the premise holds, agrees to 1e-5.
+   **Changes:** the plan summary marks a checker on the primary's code as "(same code: model-form check only)";
+   section 4.3 still lists it among the checkers (a plan is about capability), and A11.4 keeps it from verifying.
+   The energy-balance bias ramp saves and restores the node solutions around a failed step (a diverged Newton
+   step can leave Tn overflowing); the solver's "matrix is singular" lines in the log are such failed steps,
+   each followed by a smaller one. **Clarifications:** "the A3 floor" in R50 is the A3.2 floor, 1e-6 A/cm^2;
+   R54 compares a = devsim with b = devsim_eb; R51 holds for both contacts.

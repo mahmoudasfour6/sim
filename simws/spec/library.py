@@ -45,6 +45,25 @@ def pn_diode_1d(NA_cm3: float = 1e17, ND_cm3: float = 1e16, junction_um: float =
                    numerics=Numerics(relative_error=1e-12, absolute_error=1e10, max_iterations=80))
 
 
+def n_bar_1d(N_D_cm3: float = 1e16, length_um: float = 2.0, mu_n: float = 1000.0, mu_p: float = 400.0,
+             nodes: int = 2001, T: float = 300.0, V: Optional[Sequence[float]] = None) -> Problem:
+    """Uniform n-type silicon bar (contract A11.3): contacts "left" (x_min) and "right" (x_max), constant mobilities,
+    no SRH, Auger or band-gap narrowing, Boltzmann statistics, uniform mesh; a dc sweep of "right" or equilibrium."""
+    h = length_um / (nodes - 1)
+    dev = DeviceSpec(
+        name="n_bar_1d", dimension=1,
+        regions=[Region(name="si", material="silicon", box=Box(x=(0.0, length_um)))],
+        contacts=[Contact(name="left", region="si", side="x_min"), Contact(name="right", region="si", side="x_max")],
+        doping=[DopingTerm(species="donor", concentration_cm3=N_D_cm3, box=Box(), label="uniform")],
+        mesh=MeshHints(x_lines=[(0.0, h), (length_um, h)]),
+        description="uniform n-type silicon bar")
+    models = ModelSpec(temperature_K=T, mobility="constant", mu_n_cm2_Vs=mu_n, mu_p_cm2_Vs=mu_p, srh="off",
+                       auger=False, band_gap_narrowing="off")
+    analysis = Equilibrium() if V is None else DCSweep(contact="right", values_V=[float(v) for v in V], step_V=0.05)
+    return Problem(device=dev, models=models, analysis=analysis,
+                   numerics=Numerics(relative_error=1e-12, absolute_error=1e10, max_iterations=80))
+
+
 def npn_hbt_2d(width_um: float = 1.5, depth_um: float = 1.5, w_e: float = 0.5, t_e: float = 0.03, w_b: float = 0.05,
                N_E: float = 1e20, N_B: float = 2e18, N_C: float = 5e16, N_SC: float = 1e19, y_sc: float = 1.0,
                x_xb: float = 0.7, y_xb: float = 0.1, x_bc: float = 0.9, ge_peak: float = 0.15, ge_start: float = 0.0,

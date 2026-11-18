@@ -9,7 +9,7 @@ from simws.engines.base import Capability
 
 ENGINES: Dict[str, str] = {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
                            "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
-                           "ngspice": "simws.engines.ngspice_engine"}
+                           "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine"}
 
 
 def names() -> List[str]:
@@ -32,6 +32,12 @@ def capability(name: str):
 def family(name: str) -> str:
     """The problem family the engine solves (contract A7.3): "device" unless the module sets FAMILY."""
     return getattr(module(name), "FAMILY", "device")
+
+
+def code(name: str) -> str:
+    """The code an engine runs on (contract A11.4): the module's CODE, else its name. Two engines on the same
+    code are never independent of each other."""
+    return getattr(module(name), "CODE", name)
 
 
 def adapter_name(name: str) -> str:

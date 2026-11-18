@@ -20,7 +20,11 @@ class Plan(BaseModel):
         lines = [f"problem {self.problem_id}: " + (f"primary engine {self.primary}" if self.primary
                                                    else "no engine can run it")]
         if self.checkers:
-            lines.append("  checkers: " + ", ".join(self.checkers))
+            # A11.6: an engine on the primary's code is a different-physics check, not a second opinion
+            code = _engines.code(self.primary) if self.primary in _engines.ENGINES else self.primary
+            tag = lambda e: e + (" (same code: model-form check only)" if e in _engines.ENGINES  # noqa: E731
+                                 and _engines.code(e) == code else "")
+            lines.append("  checkers: " + ", ".join(tag(e) for e in self.checkers))
         for e, w in sorted(self.warnings.items()):
             lines.append(f"  {e} warns: " + "; ".join(w))
         for e, r in sorted(self.refused.items()):

@@ -26,7 +26,7 @@ ALL_KINDS = ["resistor", "capacitor", "inductor", "vsource", "isource", "diode",
 ALL_MODELS = ["diode", "npn", "pnp", "va"]
 LETTER = {"resistor": "R", "capacitor": "C", "inductor": "L", "vsource": "V", "isource": "I", "diode": "D",
           "bjt": "Q", "va": "N", "subckt": "X"}
-OTHER_ENGINES = ["charon", "devsim", "g4see", "rustbca"]
+OTHER_ENGINES = ["charon", "devsim", "devsim_eb", "g4see", "rustbca"]   # amended by the lead (A11.3)
 
 VA_SRC = """`include "disciplines.vams"
 module mydiode(a, c);
@@ -253,7 +253,7 @@ def test_registry_has_ngspice():
     for n, m in (("devsim", "simws.engines.devsim_engine"), ("charon", "simws.engines.charon_engine"),
                  ("rustbca", "simws.engines.rustbca_engine"), ("g4see", "simws.engines.g4see_engine")):
         assert engines.ENGINES[n] == m
-    assert sorted(engines.ENGINES) == ["charon", "devsim", "g4see", "ngspice", "rustbca"]
+    assert sorted(engines.ENGINES) == ["charon", "devsim", "devsim_eb", "g4see", "ngspice", "rustbca"]   # amended by the lead (A11.3)
     assert engines.names() == sorted(engines.ENGINES)
 
 

@@ -156,10 +156,19 @@ def compare_results(hub, rid_a: str, name_a: str, rid_b: str, name_b: Optional[s
     c = compare(ra.q(name_a), rb.q(name_b or name_a), **kw)
     ea, eb = _engine_of(hub, rid_a), _engine_of(hub, rid_b)
     # A2.3: only a different engine is a second opinion; a sketch is nobody's opinion
-    independent = c.kind == "measurement" or (bool(ea) and bool(eb) and ea != eb
+    # A11.4: and only one on different code (devsim and devsim_eb share DEVSIM: a different-physics check)
+    independent = c.kind == "measurement" or (bool(ea) and bool(eb) and _code(ea) != _code(eb)
                                               and "sketch" not in ra.flags and "sketch" not in rb.flags)
     return c.model_copy(update={"a": rid_a, "b": rid_b, "engine_a": ea, "engine_b": eb,
                                 "independent": bool(independent)})
+
+
+def _code(engine: str) -> str:
+    try:
+        from simws import engines
+        return engines.code(engine) if engine in engines.ENGINES else engine
+    except Exception:  # noqa: BLE001
+        return engine
 
 
 def _engine_of(hub, rid: str) -> str:

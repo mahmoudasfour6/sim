@@ -155,6 +155,30 @@ What to keep in mind: no uncertainty is attached to circuit results (flag `budge
 foundry library carry its file's SHA-256 in a flag, because the library is not part of the description; every
 circuit result is `unverified` (no second circuit engine yet).
 
+## Single event to circuit (contract A10)
+
+`simws.chain.see` turns deposited energy into charge (3.66 eV per pair in silicon, Scholze et al. 1998), charge
+into a current pulse (Messenger's double exponential, with time constants you supply), finds a node's critical
+charge by bisection over ngspice runs, and reads from a G4SEE result the probability that one particle deposits
+at least that charge.
+
+```python
+from simws.chain import see as C
+qc = C.critical_charge(hub, circuit, "n", threshold_V=0.5, tau_rise_s=1e-12, tau_fall_s=10e-12,
+                       q_low_C=5e-15, q_high_C=3e-13)               # circuit: a transient CircuitProblem
+up = C.upset_probability(hub.result(see_result_id), qc)             # P, its bracket P_low..P_high, sigma
+```
+
+`python tools/v1_upset_demo.py` runs 5 MeV alphas against three nodes. All collected charge goes to one node and
+the pulse shape is assumed, so treat P as an estimate of the mechanism, not of a real chip.
+
+## Energy balance: a different-physics check (contract A11)
+
+`device.devsim_eb` solves the same 1D Problem with an electron energy balance (Baccarani-Wordeman 1985): hot
+electrons, their falling mobility and velocity saturation. It runs on DEVSIM too, so comparing it with
+`device.devsim` tells you how much a drift-diffusion result depends on that physics; it never makes either
+result "verified". `python tools/v1_energy_balance_demo.py` compares the two on a bar and on the pn diode.
+
 ## What is not in v1
 
 - DEVSIM translator limits: one silicon region (with Ge grading), ohmic contacts; equilibrium, DC sweeps and
