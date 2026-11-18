@@ -207,11 +207,12 @@ def test_plan_implant_problem():
     p = _implant("P")
     pl = plan(p)
     assert pl.problem_id == p.problem_id()
-    assert pl.primary == "rustbca" and pl.checkers == []
+    # amended by the lead (A13.3): g4implant is the checker; its tested ranges are empty until A13.6
+    assert pl.primary == "rustbca" and pl.checkers == ["g4implant"]
     assert set(pl.refused) == {"devsim", "charon", "g4see", "ngspice", "devsim_eb"}   # amended by the lead (A8.3, A9.3, A11.3)
     for n in ("devsim", "charon", "g4see", "ngspice", "devsim_eb"):
         assert len(pl.refused[n]) == 1 and pl.refused[n][0].startswith("problem kind:")
-    assert pl.warnings == {}
+    assert "rustbca" not in pl.warnings
     assert "rustbca" in pl.summary()
 
 
@@ -219,7 +220,7 @@ def test_plan_implant_outside_tested_warns():
     from simws.engines.planner import plan
     pl = plan(_implant("As", 50.0))
     assert pl.primary == "rustbca"
-    assert list(pl.warnings) == ["rustbca"]
+    assert "rustbca" in pl.warnings                 # amended by the lead (A13.3): g4implant warns too
     assert pl.warnings["rustbca"][0].startswith("energy_keV_per_amu:")
 
 
@@ -238,6 +239,7 @@ def test_plan_implant_refused_by_capability():
     pl = plan(_implant("B", 300.0))                          # 27.2 keV/amu > 25
     assert pl.primary is None
     assert any(s.startswith("max_keV_per_amu:") for s in pl.refused["rustbca"])
+    assert any(s.startswith("max_keV_per_amu:") for s in pl.refused["g4implant"])   # amended by the lead (A13.3)
 
 
 # ------------------------------------------------------------------------------------------------ capability sheet
@@ -247,8 +249,8 @@ def test_rustbca_capability_exact():
     assert c.engine == "rustbca" and c.in_process is True
     assert c.structures == ["amorphous"]
     assert c.potentials == ["zbl", "kr_c", "moliere"]
-    assert c.electronic_stopping == ["lindhard_scharff"]
-    assert c.recoils == [False]
+    assert c.electronic_stopping == ["lindhard_scharff", "empirical"]   # amended by the lead (A12.5)
+    assert c.recoils == [False, True]                                  # amended by the lead (A14.3)
     assert c.max_layers == 20
     assert c.max_keV_per_amu == 25.0
     # amended by the lead (contract A7.9): only what passed R16 counts as tested, after the boron FAIL

@@ -9,7 +9,8 @@ from simws.engines.base import Capability
 
 ENGINES: Dict[str, str] = {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
                            "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
-                           "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine"}
+                           "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine",
+                           "g4implant": "simws.engines.g4implant_engine"}
 
 
 def names() -> List[str]:

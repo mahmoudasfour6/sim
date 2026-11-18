@@ -32,7 +32,8 @@ class Plan(BaseModel):
         return "\n".join(lines)
 
 
-def plan(problem, prefer: Sequence[str] = ("devsim",), engines: Optional[Sequence[str]] = None) -> Plan:
+def plan(problem, prefer: Sequence[str] = ("devsim", "rustbca"), engines: Optional[Sequence[str]] = None) -> Plan:
+    # A13.3: rustbca stays the implant primary (g4implant sorts first); devsim stays the device primary
     names = sorted(engines) if engines is not None else _engines.names()
     ok: List[str] = []
     refused: Dict[str, List[str]] = {}

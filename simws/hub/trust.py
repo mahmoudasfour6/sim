@@ -89,6 +89,19 @@ def assess(res: ResultEnvelope, comparisons: Sequence[dict] = ()) -> Trust:
     if validated and failed_meas:
         extra.append(f"not validated: {len(failed_meas)} measurement comparison(s) failed, {len(validated)} passed")
         validated = []
+    # amendment A13.7 (stricter only): one failed independent engine comparison blocks "verified", as A1.10 does for
+    # "validated"; and a result flagged as a known failure is never above "unverified" (two codes agreeing on a model
+    # known to be wrong verify the code, not the number)
+    failed_pair = [c for c in mine if c.get("kind") == "engine_pair" and c.get("independent") and not c.get("passed")
+                   and not c.get("inconclusive")]
+    if verified and failed_pair:
+        extra.append(f"not verified: {len(failed_pair)} engine comparison(s) failed, {len(verified)} passed")
+        verified = []
+    known = [f for f in res.flags if ":known_failure:" in f]
+    if known and (validated or verified):
+        extra.append("not verified: the result carries a known-failure flag (" + known[0].split(":", 2)[0] +
+                     ":known_failure); agreement with another code does not make it right")
+        validated, verified = [], []
     if validated:
         level, reasons = "validated", validated + verified
     elif verified:

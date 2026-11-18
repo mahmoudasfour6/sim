@@ -1,4 +1,4 @@
-"""Implant adapters (architecture v1, contract amendment A7.5): implant.rustbca.
+"""Implant adapters (architecture v1, contract amendments A7.5, A13.4, A14.4): implant.rustbca, implant.g4implant.
 
 One base class runs any simws.spec ImplantProblem through the engine module named by the subclass. The engine
 returns where each implanted ion stopped; everything derived from that (moments, profile, error bars) is computed
@@ -23,6 +23,16 @@ MIN_IMPLANTED = 100                 # fewer stopped ions than this: no range sta
 PAPER_MIN_IMPLANTED = 10000
 Z_MAX = 4.0                         # split-halves check: |difference of the two half means| / its standard error
 STATISTICAL_ONLY_FLAG = "budget:statistical_only"
+# A14.4: present only with recoils, so not in the manifest (the gatekeeper requires every declared output)
+DAMAGE_OUTPUTS = [
+    OutputSpec(name="implant.vacancies_per_ion", unit="dimensionless", constraint="nonnegative",
+               description="A14: target atoms displaced (given more than their Ed) per launched ion, full cascade"),
+    OutputSpec(name="implant.vacancy_profile", unit="1/m", constraint="nonnegative",
+               description="A14: vacancies per launched ion and per metre of depth, on the axis 'depth'"),
+    OutputSpec(name="implant.vacancy_depth_mean", unit="m", constraint="positive",
+               description="A14: mean depth at which the vacancies were made"),
+]
+DAMAGE_FLAG = "implant:damage_full_cascade: no recombination or annealing; an upper bound on surviving defects (A14.1)"
 
 _OUTPUTS = [
     OutputSpec(name="implant.Rp", unit="m", constraint="positive", description="projected range: mean depth of the implanted ions"),
@@ -143,6 +153,9 @@ class ImplantAdapter(Adapter):
             qs.append(q("implant.concentration", (dose * prof).tolist(), "1/m**3", (dose * prof_sig).tolist(),
                         axes=axes))
 
+        if problem.models.recoils:
+            qs += self._damage(ctx, res, problem, q, axes, n, b, nb)
+
         # split halves: the first k//2 implanted ions against the rest (are the ions independent samples?)
         h = k // 2
         a, c = x[:h], x[h:]
@@ -152,6 +165,38 @@ class ImplantAdapter(Adapter):
                                           "rp_halves_um": [float(a.mean() / UM), float(c.mean() / UM)],
                                           "z": z, "passed": bool(abs(z) <= Z_MAX)}
         return qs
+
+    @staticmethod
+    def _damage(ctx, res, problem, q, axes, n, b, nb):
+        """A14.4: vacancy quantities, uncertainties from the means of the batches."""
+        h = np.asarray(res.vacancy_batches, float)
+        ions = np.asarray(res.vacancy_batch_ions, float)
+        if h.ndim != 2 or h.shape[1] != nb or h.shape[0] != ions.size or int(ions.sum()) != n or h.shape[0] < 2:
+            raise AdapterError(f"damage histograms: shape {h.shape}, ions {ions.tolist()}; expected (batches, {nb}) "
+                               f"for {n} ions")
+        nbat = h.shape[0]
+        x = (np.arange(nb) + 0.5) * b
+        total = h.sum(axis=1)                                    # vacancies per batch
+        per_ion_b = total / ions
+        prof_b = h / (ions[:, None] * b)
+        mean_b = np.array([float((hb * x).sum() / hb.sum()) if hb.sum() > 0 else np.nan for hb in h])
+        se = lambda v: float(np.std(v, ddof=1) / math.sqrt(v.size))     # noqa: E731
+        vtot = float(h.sum())
+        if not vtot > 0:
+            raise OutsideValidity("no vacancy was made: the ion never gave a target atom more than its Ed")
+        ctx.flags.append(DAMAGE_FLAG)
+        ctx.diagnostics.update({"n_vacancies": int(vtot), "damage_batches": nbat})
+        prof = h.sum(axis=0) / (n * b)
+        prof_sig = np.std(prof_b, axis=0, ddof=1) / math.sqrt(nbat)
+        out = [q("implant.vacancies_per_ion", vtot / n, "dimensionless", se(per_ion_b)),
+               q("implant.vacancy_profile", prof.tolist(), "1/m", prof_sig.tolist(), axes=axes),
+               q("implant.vacancy_depth_mean", float((h.sum(axis=0) * x).sum() / vtot), "m",
+                 se(mean_b[np.isfinite(mean_b)]))]
+        if problem.beam.dose_cm2 is not None:
+            dose = problem.beam.dose_cm2 * 1e4
+            out.append(q("implant.vacancy_concentration", (dose * prof).tolist(), "1/m**3",
+                         (dose * prof_sig).tolist(), axes=axes))
+        return out
 
     def self_check(self, job, ctx, qs) -> List[str]:
         d = ctx.diagnostics
@@ -177,3 +222,14 @@ class ImplantRustbca(ImplantAdapter):
         verification={"statistics": "split halves: the range of the first and second half of the ions agree "
                                     "within 4 standard errors"},
         inputs=["problem"], outputs=_OUTPUTS, citations=["drobny2021"])
+
+
+class ImplantG4implant(ImplantAdapter):
+    ENGINE = "g4implant"
+    manifest = Manifest(
+        name="implant.g4implant", version="1.0", env="tcad", engine="g4implant", engine_version="11.2.2",
+        description="Any simws.spec ImplantProblem the Geant4 translator supports: ion range profiles and "
+                    "displacement counts in layered amorphous targets (G4ScreenedNuclearRecoil)",
+        verification={"statistics": "split halves: the range of the first and second half of the ions agree "
+                                    "within 4 standard errors"},
+        inputs=["problem"], outputs=_OUTPUTS, citations=["geant4_2016", "mendenhall2005"])

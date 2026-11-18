@@ -1626,3 +1626,327 @@ a verification. Owner's instruction: "lets do 1 and 2", 18 Nov (2 = a second eng
    step can leave Tn overflowing); the solver's "matrix is singular" lines in the log are such failed steps,
    each followed by a smaller one. **Clarifications:** "the A3 floor" in R50 is the A3.2 floor, 1e-6 A/cm^2;
    R54 compares a = devsim with b = devsim_eb; R51 holds for both contacts.
+7. **On the owner's laptop (18 Nov, update 8, commit 155f1e7 there).** A10 R40 to R44 and A11 R50, R51, R52 at
+   2 V, R53 and R54 passed with the same numbers as on the build machine; R52 at 6 V and 20 V are the recorded
+   expected failures. The energy-balance suite took 10 minutes there.
+
+### A12 (18 Nov 2026, lead): electronic stopping from measured data for RustBCA ("empirical")
+
+A7.9 recorded that RustBCA's Lindhard-Scharff (LS) electronic stopping is too weak for boron in silicon and that a
+correction factor needs a source other than the range table that failed. This amendment takes the factor from
+measured stopping powers and keeps the 1975 range tables of R16 out of its derivation, so R16 can be run again as
+a test that the factor did not see. Owner's instruction: "lets do all except 3", 18 Nov (1 = a stopping
+correction from sourced data).
+
+0. **What the lead had already seen when this was written.** (a) A7.9: multiplying the LS stopping by 1.6 (a
+   post hoc trial, not sourced) brought boron at 100 keV to +1.7 % in Rp. (b) Which data sets the database below
+   holds for B, P and As in Si (authors, numbers of points, energy ranges); no stopping value had been divided
+   by LS when this section (items 0 to 2) was committed. Items 3 onward were written after the factor of item 2
+   was computed and before any RustBCA run with it.
+1. **Source.** IAEA Electronic Stopping Power of Matter for Ions database, release 2026-09, the file
+   `StoppingPower.csv` from https://www-nds.iaea.org/stopping/download/tuples (downloaded 18 Nov 2026; zip
+   SHA-256 0813d4137aa571eb8d8d48e96ed7ca3dd2b7ef10e510d627e7d01029379ba01b, CSV SHA-256
+   dacc1c57e39a8187129d9b6593e5aa91276ca317a7f0c7530869446347f9af0c). Citation: C. C. Montanari et al., Nucl.
+   Instrum. Methods B 551 (2024) 165336, doi 10.1016/j.nimb.2024.165336. The rows used are copied into
+   `simws/data/stopping/iaea_<ion>_si.csv` with the database's own columns, so the derivation can be repeated
+   without the network.
+2. **Rule (fixed before computing).** For an ion X in silicon:
+   (a) rows with projectile X, target Si, phase "s", energy unit MeV/u, energy at most 0.010 MeV/u (10 keV/u:
+   the whole slowing-down of the beams R16 tests, boron at 100 keV is 9.1 keV/u), and a reference that is a
+   measurement: rows whose `ref_id` is SRIM2013 (a fitted table) are excluded, every other row is kept;
+   (b) for each row, r_i = S_i / S_LS(E_i), S_i the row's `stopping_power_converted` in MeV/(mg/cm^2), S_LS the
+   value of RustBCA 3.0.0's own `electronic_stopping_cross_sections(Z1, 14, E, M1, 1.0, 1.0)[0]` (eV m^2 per
+   atom) converted with the silicon atom mass 28.0855 u, E = (MeV/u value) x M1 x 1e6 eV, M1 the row's
+   `ion_isotope` (u);
+   (c) weights w_i = 1 / (r_i e_i)^2 with e_i the row's `percentage_error` / 100, or 0.10 where it is empty;
+   ck = sum(w_i r_i) / sum(w_i); its standard uncertainty u = sqrt(1 / sum w_i) x max(1, sqrt(chi2 / (n - 1)))
+   with chi2 = sum w_i (r_i - ck)^2 (the Birge ratio inflates it when the sets disagree);
+   (d) an entry exists only when at least 3 rows from at least 2 publications pass (a); otherwise the ion has no
+   empirical stopping in silicon and the mode is refused for it;
+   (e) reported with the entry, never used to change it: the leave-one-publication-out values of ck, and the
+   slope of r against E / M1 from an unweighted straight-line fit (a constant ck is a model choice; the slope
+   says how good a choice it is).
+3. **The factor that the rule gives (computed 18 Nov, after items 0 to 2 were committed as 251fce4).** Boron:
+   11 rows from 4 publications (Grahmann and Kalbitzer 1976, 4 rows; Hofker et al. 1975, 4; Hoffmann et al.
+   1976, 1; Siketic et al. 2010, 2), 0.40 to 9.09 keV/u: **ck = 1.381, u = 0.195**. The sets disagree: chi2 =
+   1190 for 10 degrees of freedom (Birge ratio 10.9); Grahmann and Kalbitzer give r of 0.98 to 1.10, the others
+   1.40 to 1.55, and Siketic's 0.40 keV/u row gives 3.58. Leave one publication out: 1.761 (without Grahmann),
+   1.373 (without Hofker), 1.380 (without Hoffmann), 1.072 (without Siketic). Slope of r: -0.073 per keV/u.
+   Phosphorus: no row passes (a), so no entry. Arsenic: 6 rows from one publication (Tan et al. 1988), so no
+   entry. So "empirical" exists for boron only, with a large stated uncertainty.
+4. **Description.** `ImplantModels.electronic_stopping` becomes `Literal["lindhard_scharff", "empirical"]`,
+   default unchanged, so no existing problem id changes (`implant_si("P", 50)` is
+   5cfbc9d5e496882805061234f5349fe1 and `implant_si("B", 100)` is 7141925e1068b3eda07be7f312f0690d, before and
+   after). "empirical" means: electronic stopping taken from measured data, each engine with its own stated
+   source; a result in this mode carries a flag starting `"implant:empirical_stopping:"` that names it.
+5. **RustBCA in "empirical" mode.** `simws.radiation.empirical_stopping` implements A12.2 (`entry(ion)`,
+   `selected(ion)`, `lindhard_scharff_cross_section_eV_m2`, `lindhard_scharff_MeV_cm2_mg`) from the CSV in
+   `simws/data/stopping`. The translator uses mode LOW_ENERGY_NONLOCAL as before and sets every layer's
+   `electronic_stopping_correction_factors` to the entry's ck. It refuses (reason starting
+   `"electronic_stopping:"`) when the ion has no entry, or when a layer holds anything other than Si (RustBCA
+   applies one factor to every species of a layer, and the factor is for silicon). The BORON_FLAG of A7.9 is not
+   set in this mode; the flag is `"implant:empirical_stopping: Lindhard-Scharff x <ck> +- <u> from <n> measured
+   points (IAEA database, A12); the data sets disagree (Birge ratio <b>)"` with three decimals for ck and u and
+   one for b. Diagnostics gain `stopping_ck` and `stopping_ck_u`. `run(problem, workdir=None, ck=None)`: a
+   given ck replaces the entry's (for R16s; the hub never passes it). `ImplantCapability` gains
+   `tested_ion_symbols_by_stopping: Dict[str, List[str]] = {}`: when the problem's electronic_stopping is a key,
+   that list is used instead of `tested_ion_symbols`. It stays empty until R16e has been run.
+6. **Acceptance (tolerances fixed here, before any RustBCA run with the factor).** Library problems, 20 000 ions,
+   seed 1, ZBL, as A7.7.
+   R16e (the held-out table): `implant_si("B", 50)` and `implant_si("B", 100)` with electronic_stopping
+   "empirical": `implant.Rp` and `implant.dRp` each within 25 % of the R16 table values (B 50 keV 0.1608 /
+   0.0504 um; B 100 keV 0.2994 / 0.0710 um). The gate is R16's, unchanged. Only if all four pass, the RustBCA
+   capability gets `tested_ion_symbols_by_stopping = {"empirical": ["B"]}`.
+   R16s (sensitivity, reported, no gate): the same two problems with ck - u and ck + u; the spread of Rp says how
+   much the disagreement of the data sets matters.
+   R17 (the rule, repeated): ck, u, n and the publications recomputed from the CSV files and the text of A12.2
+   alone agree with `entry("B")` to 1e-9 relative; `entry("P")` and `entry("As")` are None.
+   R18 (the LS formula): `lindhard_scharff_cross_section_eV_m2` equals RustBCA's own
+   `electronic_stopping_cross_sections(Z1, 14, E, M1, 1, 1)[0]` to 1e-12 relative for B, P and As at 1, 10 and
+   100 keV (skipped where libRustBCA is not installed).
+   R19 (refusals and no side effects): "empirical" for P and for As is refused; a boron problem with a layer
+   holding O is refused; the default mode gives `depth_um` identical to a run of the same problem before A12
+   (the same seed and input dictionary: `build_input` of a default problem has every correction factor 1.0).
+7. **Trust.** Neither mode makes a RustBCA result verified (A7.6 still holds); R16e is evidence against a theory
+   table that the factor did not see, not a validation against measured ranges.
+8. **After the checker's report (18 Nov).** 26 tests written from A12 alone. R17 passed (the checker's own
+   recomputation agrees with `entry("B")` to 2e-16; every number of item 3 reproduced), R18 passed (1e-12), R19
+   passed. **R16e passed, all four:** B 50 keV Rp 184.2 nm against 160.8 (+14.6 %), dRp 57.4 against 50.4
+   (+13.8 %); B 100 keV Rp 334.6 against 299.4 (+11.8 %), dRp 81.0 against 71.0 (+14.0 %). So, as item 6 says,
+   the RustBCA capability now has `tested_ion_symbols_by_stopping = {"empirical": ["B"]}`. R16s (reported):
+   with ck - u the boron Rp is +23.8 % (50 keV) and +22.8 % (100 keV), with ck + u +6.8 % and +2.8 %; dRp at
+   ck - u is +27 % and +31 %, outside 25 %. The disagreement between the measured data sets is therefore the
+   largest error left in boron ranges: about +-8 % in Rp.
+   **Clarifications (no tolerance involved):** the atomic mass unit is RustBCA's (1.66053906660e-27 kg); the
+   keys of the entry are those of the module (`leave_one_out`, `slope_per_keV_u`, `birge_ratio`).
+
+### A13 (18 Nov 2026, lead): a second implant engine on different code, Geant4 ("g4implant")
+
+A7.6 says an implant result stays "unverified" until a second, different implant engine is compared with it.
+This engine runs the same ImplantProblem through Geant4 11.2.2 (the toolkit already installed for G4SEE, A8):
+different code, a different nuclear-scattering algorithm, and two choices of electronic stopping. Owner's
+instruction: "lets do all except 3", 18 Nov (2 = a second implant engine).
+
+0. **What the lead had already seen when this was written** (scouting on 18 Nov, so the reader can judge the
+   tolerances). (a) Arsenic at 80 keV into the `implant_si` target, 2000 to 20 000 ions, Lindhard-Scharff
+   stopping: Geant4 Rp 70.1 nm with the physics cutoff of item 3 at 10 eV, 62.4 nm at 1 eV, 59.3 at 0.2, 55.8 at
+   0.05, 46.1 at 0.01 and 34.2 at 0.002; RustBCA Rp 56.4 nm. Counting the two branches of
+   G4ScreenedNuclearRecoil's impact-parameter sampling showed that at 10 eV only the long-flight branch is used,
+   at 1 eV 8 % of the collisions take the short-flight branch, at 0.05 eV 37 %; the short-flight branch puts
+   more collisions per unit area than there are atoms, which is why the range keeps falling. (b) Geant4's
+   electronic stopping in "empirical" mode (G4IonParametrisedLossModel) divided by Lindhard-Scharff: 1.34 for
+   boron and 1.05 for phosphorus, constant from 1 to 200 keV (Geant4 scales its lowest table value with the
+   square root of the energy); the value is the same in a material built from atom densities and in G4_Si.
+   (c) Arsenic at 80 keV with recoils (A14), displacement energy 15 eV: RustBCA 2186 vacancies per ion, mean
+   vacancy depth 42.0 nm (100 ions; 2.4 GB of memory for those 100 ions, with the silicon cutoff 1.5 eV);
+   Geant4 1889 per ion and 48.8 nm (200 ions, cutoff 10 eV). (d) G. Hobler et al. (SISDEP 1991) fitted boron
+   electronic stopping in silicon to channeling data as 1.5 times Lindhard's; noted, not used (A12.2 is fixed).
+   No boron or phosphorus range or damage case had been run with this engine.
+1. **Program.** `tools/g4implant/g4implant.cc` (simws code, about 350 lines) compiled against Geant4 together
+   with TestEm7's G4ScreenedNuclearRecoil.cc and G4LindhardPartition.cc from the Geant4 11.2.2 examples
+   (`share/Geant4/examples/extended/electromagnetic/TestEm7` in the env). It reads a keyword input file and
+   writes the end point of every ion, in launch order. Geometry: the layers as boxes 2 m wide along y and z
+   (laterally infinite for these ranges) in a vacuum world 1 nm thicker on each side; the ion starts 0.5 nm in
+   front of the surface. Serial run manager, CLHEP seed = the problem's seed, so a run is repeatable.
+   Physics, GenericIon only: G4ScreenedNuclearRecoil (Mendenhall and Weller, NIM B 227 (2005) 420) with the
+   problem's screening function (zbl, or mol for "moliere"; Kr-C is refused), no multiple-scattering process
+   (as TestEm7 below 100 MeV); production cut 1 km (no delta electrons). Electronic stopping:
+   "lindhard_scharff": a continuous process written in g4implant.cc, dE/dx = sum over elements of n_i
+   S_LS(Z1, Z2_i, E, M1), S_LS exactly RustBCA's formula (A12.5), integrated exactly over each step, a step
+   losing at most 5 % of the energy; Z1 and M1 of the moving atom (Geant4's nuclear mass in u);
+   "empirical": G4ionIonisation with G4IonParametrisedLossModel, Geant4's own data and scaling.
+   The app writes `# dedx_e <E> keV <value> MeV_cm2_g` header lines for requested energies in both modes.
+2. **Install.** `tools/install_g4implant.sh` compiles the program into the g4see env (A8.8) with that env's
+   compiler and geant4-config, and installs `<env>/bin/g4implant`. It stops with a message when the env, the
+   compiler or the TestEm7 sources are missing. Tests that need it are skipped where it is not installed.
+3. **Engine `g4implant`** (`simws/engines/g4implant_engine.py`, family implant, code "geant4", env "g4see",
+   not in process; prefix as the G4SEE engine: SIMWS_G4SEE_PREFIX or `<envs_root>/g4see`). Fixed settings:
+   physics cutoff 10 eV (G4ScreenedNuclearRecoil's own default, the value its header calls typical, and per
+   0(a) the one at which only the branch its sampling was written for is used); recoil cutoff per nucleon =
+   the ion's `cutoff_eV` / its mass (so the ion stops below its cutoff) in range mode, A14.3 in damage mode.
+   The ion is Geant4's ion (Z, A = round(mass_amu)). Capability: structures ["amorphous"], potentials ["zbl",
+   "moliere"], electronic_stopping ["lindhard_scharff", "empirical"], recoils [False, True] (A14), max_layers
+   20, max_keV_per_amu 25 (as RustBCA, so both engines take the same problems), tested ranges set after the
+   acceptance runs (until then: tested_keV_per_amu (0, 0), tested_target_symbols ["Si"], tested_ion_symbols
+   ["none"], so every result is flagged `extrapolated:`). Flags on every result: the amorphous flag of A7 and
+   `"implant:geant4_nuclear_cutoff: collisions transferring less than 10 eV are ignored (G4ScreenedNuclearRecoil
+   physics cutoff, A13.3)"`; in "empirical" mode `"implant:empirical_stopping: Geant4 G4IonParametrisedLossModel
+   (its ion data, scaled with the square root of the energy below the lowest table energy; A13)"`. The surface
+   and bulk binding energies are not used by this engine (stated in its notes; A14.3 refuses bulk binding with
+   recoils). Diagnostics: geant4 version line, ion mass (u), physics cutoff, recoil cutoff per nucleon,
+   material densities. Errors: the program not installed -> EngineNotAvailable with the install command;
+   a non-zero exit -> the last lines of its log in the message.
+4. **Adapter `implant.g4implant`**: the A7.5 adapter with ENGINE "g4implant" (same quantities, error bars,
+   split halves, self-checks), env "tcad" (corrected 18 Nov before any acceptance run: as the G4SEE adapter, the
+   adapter runs in the tcad env and calls the program in the g4see env; "g4see" is the engine's env), engine_version "11.2.2", citations geant4_2016 and
+   mendenhall2005 (added to the citation list).
+5. **Acceptance (tolerances fixed here, before any of these runs).** Library problems, 20 000 ions, seed 1, ZBL,
+   unless stated. "Within 4 sigma" as A7.7.
+   R60 (repeatability): `implant_si("P", 50, n_ions=2000)` twice gives identical `depth_um`; seed 2 differs.
+   R61 (counting): implanted + reflected + transmitted = N in every run; a 0.05 um target under P at 100 keV
+   (n_ions=2000) has transmitted ions and the transmitted flag.
+   R62 (honest error bars): `implant_si("P", 50)` with seeds 1 and 2 agree in Rp, dRp and lateral straggle
+   within 4 sigma.
+   R63 (the LS formula in the program): the `dedx_e` lines in "lindhard_scharff" mode for B, P and As in the
+   `implant_si` target at 10, 50 and 100 keV equal `lindhard_scharff_MeV_cm2_mg` within 1e-3 relative (the
+   ion's nuclear mass differs from the isotope mass by Z electron masses).
+   R64 (the published tables, "empirical" mode): B 50, B 100 and P 50 keV: Rp and dRp each within 25 % of the
+   R16 table values (R16's gate). Reported without a gate: the same in "lindhard_scharff" mode.
+   R65 (the cross-code verification, "lindhard_scharff" mode, the same problem on both engines): B 50, B 100
+   and P 50 keV: `implant.Rp` within 10 % and `implant.dRp` within 15 % of RustBCA's, with
+   `simws.compare.compare_results` (relative metric) reporting `independent` True. Why 10 % and 15 %: both
+   engines then use the same screening function and the same electronic stopping formula, so what remains is
+   the collision algorithm (free-flight path, impact-parameter sampling, scattering integral, the 10 eV
+   cutoff); a range that two such implementations give differently by more than 10 % is not known to 10 %.
+   0(a) shows arsenic at 80 keV is 24 % apart; it is reported, not gated.
+   R66 (reported, no gate): Geant4 "empirical" against RustBCA "empirical" for B 50 and 100 keV (different
+   stopping data, 1.34 against 1.38 times LS); and B 50 keV with the physics cutoff at 1 eV (run through the
+   program directly), to show what the cutoff choice moves.
+   R67 (trust): a RustBCA result for which R65's comparison passed and was recorded becomes "verified" by the
+   rules of section 6 (A2.3); one whose comparison failed stays "unverified". Nothing is changed in the trust
+   rules.
+6. **After the acceptance runs.** The tested ranges of item 3 are set to what passed, and the RustBCA
+   capability's notes say which ions R65 verified.
+7. **After the checker's report (18 Nov).** 31 tests written from A13 alone.
+   **A defect, fixed, and the affected checks run again:** the program aborted (Geant4 "Failed root find" in
+   G4ScreenedNuclearRecoil) when an ion that had left the target collided with the hydrogen of the vacuum world
+   (G4_Galactic). It broke R61 and the 20 000-ion "empirical" runs of B 50 and P 50 keV. Fix: an atom that enters
+   the world volume is stopped there and counted as reflected or transmitted by the side it left; no process acts
+   on the world's material. Ions that stay in the target are unaffected (the Lindhard-Scharff R65 numbers are
+   the same before and after). After the fix, R61 passed (67 implanted, 1 reflected, 1932 transmitted; the hub
+   status is outside_validity with the transmitted flag).
+   Passed: R60, R61, R62 (0.02, 0.50 and 0.68 sigma), R63 (program LS stopping +1.4e-4 to +1.5e-4 of the formula).
+   **R65 (the verification):** B 50 keV Rp +8.5 % (gate 10 %), dRp +10.0 % (15 %): passed; B 100 keV Rp +6.4 %,
+   dRp +8.4 %: passed; **P 50 keV recorded FAIL:** Rp 80.6 nm against RustBCA's 71.3 (+13.0 %), dRp 34.2 against
+   29.5 (+15.9 %). The gates are unchanged. The two codes agree to 6 to 10 % where electronic stopping decides the
+   range (boron) and differ by 13 to 24 % where nuclear collisions matter (phosphorus; arsenic in 0(a)): the
+   nuclear-collision algorithms disagree, and nothing here says which is right.
+   **R64 recorded FAIL, all three:** Geant4 "empirical" against the tables: B 50 keV Rp +25.6 %, dRp +28.4 %;
+   B 100 keV Rp +20.9 % (within), dRp +25.8 %; P 50 keV Rp +31.6 %, dRp +32.3 %. In Lindhard-Scharff mode
+   (reported): B 50 +45.9 % / +57.7 %, B 100 +44.7 % / +63.7 %, P 50 +32.8 % / +33.5 %.
+   R66 (reported): "empirical" against "empirical", boron: Geant4 deeper by 9.6 % (50 keV) and 8.2 % (100 keV) in
+   Rp; the physics cutoff at 1 eV instead of 10 eV moves B 50 keV by -3.5 % in Rp and -3.7 % in dRp.
+   **A decision on trust (stricter only, made after the results and so stated here):** R65 would have made the two
+   boron Lindhard-Scharff RustBCA results "verified", although they carry `implant:known_failure:` and are 35 %
+   too deep: both codes share the too-weak stopping, so their agreement verifies the codes, not the number. The
+   trust rules (section 6.1) gain two rules: a result carrying a flag containing ":known_failure:" is never above
+   "unverified"; and one failed, independent engine comparison blocks "verified" (as A1.10 does for
+   "validated"). R67 is amended accordingly: no RustBCA result of R65 is verified (boron: known failure;
+   phosphorus: R65 failed). Today no implant result is verified; that is the honest state.
+   **Changes:** tested ranges of g4implant set to what passed (item 6): `tested_keV_per_amu` (4.5, 9.1),
+   `tested_ion_symbols` ["B"], and nothing in "empirical" mode (`{"empirical": ["none"]}`); a g4implant boron
+   result in Lindhard-Scharff mode carries `implant:known_failure:` as RustBCA's does. The adapter's env is "tcad"
+   (item 4, corrected before the runs; the checker had read the earlier text).
+   **Clarifications:** the program's input keywords are those of `build_input`'s text (`physics_cutoff_eV` and
+   the others in the header of g4implant.cc); status 0 in its output means stopped in the target.
+
+### A14 (18 Nov 2026, lead): damage (vacancy) profiles from both implant engines
+
+A7.6 refused recoil tracking: following every recoil in memory exhausted an 8 GB machine. A14 follows the
+recoils in batches and streams them through files, so the memory is bounded by a batch, and counts vacancies.
+Owner's instruction: "lets do all except 3", 18 Nov (4 = damage profiles).
+
+0. **What the lead had already seen.** A13.0(c) (arsenic only). E. Holmstrom, A. Kuronen and K. Nordlund,
+   Phys. Rev. B 78, 045202 (2008), doi 10.1103/PhysRevB.78.045202: the threshold displacement energy of silicon
+   from DFT molecular dynamics is 12.5 eV at its minimum (<111>) and 36 eV averaged over directions; the paper
+   says the 13 to 25 eV commonly used are too low. So the displacement energy is an explicit input with no
+   default; the library and demo state their value and its source.
+1. **What is counted.** A vacancy is made wherever a target atom is given more than its displacement energy Ed
+   by a collision; that atom then moves on as a recoil and may displace others (a full cascade). No
+   recombination, no replacement collisions, an amorphous static target: the count is the BCA "full cascade"
+   number, an upper bound for what survives (the ion-beam literature finds such counts above what anneals out
+   at room temperature). Reported: the vacancy depth profile (vacancies per ion per metre, on the problem's depth
+   bins, by the depth where each vacancy was made) and the vacancies per ion.
+2. **Description.** `Atom` gains `displacement_eV: Optional[float] = None` (> 0). It is left out of the
+   serialised description when None, so no existing problem id changes (R75). `ImplantModels.recoils` True asks
+   for damage; then every atom used in a layer needs `displacement_eV`, else the problem is refused (reason
+   starting `"recoils:"`). `implant_si(..., displacement_eV=None)`: a value sets the silicon atom's
+   `displacement_eV` and `models.recoils` True.
+3. **Engines.**
+   RustBCA: the damage run uses RustBCA's own command-line program (the same crate and commit, built by
+   `tools/install_rustbca.sh` next to the Python module: `<tcad env>/bin/RustBCA`, or SIMWS_RUSTBCA_BIN),
+   because the Python call returns only the incident ions. The input is `build_input` written as TOML with
+   `track_recoils` and `track_displacements` true and the atoms' Ed. RustBCA writes a displacement row for
+   every recoil whose starting energy exceeds its species' Ed (with its start and end points). The ions are run
+   in B = 20 batches (sizes differing by at most one), batch b with seed `seed * 1000 + b` (so the seed must be
+   below 2 000 000) and `num_chunks` such that a chunk holds at most 2 x threads ions; each batch's files are
+   read, histogrammed and deleted before the next batch starts. Refused: "empirical" stopping with recoils
+   (RustBCA would scale the recoils' stopping by the boron factor too), and an atom whose Ed is below its own
+   `cutoff_eV` (RustBCA creates no recoil below the cutoff, so displacements would be lost).
+   Geant4: `recoils 1` in the program: G4ScreenedNuclearRecoil creates a recoil when it is given more than
+   (recoil cutoff per nucleon) x (its mass); the recoil cutoff is set to Ed / m of the target atom, so a recoil
+   is made exactly when a vacancy is (and the ion stops below Ed m_ion / m_target, which is flagged). The
+   program counts each recoil's creation depth into B = 20 batch histograms (event i in batch floor(20 i / N)).
+   Refused: more than one atomic species in the target (one recoil cutoff), Ed below 10 eV (the physics cutoff:
+   a smaller transfer is never made), and bulk binding above 0 (Geant4 has none).
+   Both engines return, in `ImplantResult`, `vacancy_bin_um` (the problem's `depth_bin_um`),
+   `vacancy_batches` (B lists of counts on the depth bins) and `vacancy_batch_ions` (ions per batch); vacancies
+   made outside the target (none are expected) are counted in `diagnostics["vacancies_outside"]`.
+4. **Adapter.** With recoils, the implant adapters add `implant.vacancies_per_ion` (dimensionless),
+   `implant.vacancy_profile` (1/m, on the depth axis) and `implant.vacancy_depth_mean` (m), and with a dose
+   `implant.vacancy_concentration` (1/m^3). Uncertainties from the batch means: for each batch, the vacancies
+   per ion (and per bin, and the mean depth) of that batch; the standard error over the 20 batches. (A cascade
+   is not a set of independent vacancies, so Poisson errors would be too small.) A result with recoils carries
+   `"implant:damage_full_cascade: no recombination or annealing; an upper bound on surviving defects (A14.1)"`.
+5. **Acceptance (tolerances fixed here, before any of these runs).** `implant_si(ion, E, n_ions=2000,
+   displacement_eV=15.0)`, seed 1, ZBL, "lindhard_scharff", unless stated. 15 eV is used because it is a
+   common value in BCA work (A14.0), not because it is right; the checks are about the codes.
+   R70 (counting): RustBCA: the vacancies counted equal the displacement rows whose start lies in the target
+   (checker reads one batch directly); both engines: vacancies per ion x N equals the sum of all batch
+   histograms; profile x bin x N sums to that number.
+   R71 (Ed scaling): B and P at 50 keV, Ed 15 and 30 eV: the ratio of vacancies per ion lies in [1.6, 2.4] for
+   each engine (NRT gives exactly 2).
+   R72 (NRT band): vacancies per ion / N_NRT in [0.8, 3.0] for B and P at 50 keV on both engines.
+   N_NRT = 0.8 T_dam / (2 Ed), T_dam = E / (1 + k g(eps)), k = 0.1337 Z1^(1/6) (Z1/A1)^(1/2),
+   g = 3.4008 eps^(1/6) + 0.40244 eps^(3/4) + eps, eps = E / E_L, E_L = 30.724 Z1 Z2 (Z1^(2/3) + Z2^(2/3))^(1/2)
+   (A1 + A2) / A2 eV (Norgett, Robinson and Torrens, Nucl. Eng. Des. 33, 50 (1975), with the ion as the
+   primary). A full cascade without recombination is expected at or above NRT; a count far outside the band
+   means a counting error.
+   R73 (cross-code): B and P at 50 keV: Geant4 against RustBCA, vacancies per ion within 20 % and
+   `implant.vacancy_depth_mean` within 15 %, with `compare_results` reporting `independent` True. Why: the same
+   potential, stopping formula and Ed; the counts then differ through the collision algorithm, and A13.0(c)
+   shows -14 % and +16 % for arsenic (reported, not gated).
+   R74 (memory): the RustBCA damage run for P at 50 keV, 2000 ions, with the default thread count, has a peak
+   resident memory of its child processes below 1.5 GB (`resource.getrusage(RUSAGE_CHILDREN)` in a fresh
+   process). Reported: its run time.
+   R75 (no id changes): `implant_si("P", 50)` and `implant_si("B", 100)` keep the ids of A12.4; the range-only
+   result of a problem is unchanged by A14 (RustBCA in process, `depth_um` identical).
+   R76 (refusals): as listed in items 2 and 3, each with its reason prefix ("recoils:" or
+   "electronic_stopping:").
+6. **Limits, stated.** Amorphous, static target: no channeling, no dose build-up, no recombination; the
+   damage scales linearly with dose. Ed is the user's choice and the count scales roughly as 1 / Ed.
+7. **After the checker's report (18 Nov).** 23 tests written from A14 alone; run again after the A13.7 fix.
+   Passed: R70 (the checker ran batch 0 itself with seed 1000: 123 803 displacement rows, the engine's count;
+   batches count from 0), R72 (vacancies / NRT: RustBCA 1.26 for B and 1.60 for P, Geant4 1.08 and 1.38), R74
+   (peak memory 90 MB, 56 s for P 50 keV with 2000 ions), R75, R76. RustBCA R71: Ed 15 against 30 eV gives 2.17
+   (B) and 2.15 (P).
+   **R71 recorded FAIL for Geant4:** the ratio is 1.38 (B) and 1.37 (P), outside [1.6, 2.4].
+   **R73:** B 50 keV passed (vacancies -14.8 %, mean depth +9.2 %); **P 50 keV recorded FAIL** on the mean depth
+   (+15.2 % against 15 %; vacancies -13.9 % within 20 %).
+   *Post hoc diagnosis of R71* (run after the result, so it explains and does not excuse): B 50 keV, 400 ions,
+   Geant4 vacancies per ion at Ed 15 / 30 / 60 eV: 613 / 439 / 191 with the 10 eV physics cutoff (ratios 1.39 and
+   2.30), 684 / 316 / 156 with 1 eV (2.16 and 2.03). So near its cutoff the Geant4 model under-samples the
+   transfers just above it (the long-flight impact-parameter sampling thins the collisions at the edge of the
+   cross section): counts with Ed below about three times the cutoff are wrong. **Change:** a g4implant damage
+   result with Ed below 30 eV carries `implant:damage_near_cutoff:`, which says to use the RustBCA count. The
+   R73 comparisons at 15 eV were therefore made in the region where Geant4 is weakest.
+   *Reported after the acceptance runs (the demo, Ed 36 eV, 2000 ions):* Geant4 counts 32.5 % (B 50 keV) and
+   33.3 % (P 50 keV) more vacancies than RustBCA, where at 15 eV it counted 14 % fewer; the mean depths differ by
+   +7.7 % and +16.3 %. RustBCA's count falls by 2.65 from 15 to 36 eV, Geant4's by 1.7. So the two codes agree on
+   damage counts to about 30 % at best, in either direction depending on Ed; the vacancy depth profile's shape
+   is the more robust result.
+   **Clarifications:** `implant.vacancy_depth_mean` is the pooled mean over all vacancies, its uncertainty the
+   standard error of the 20 batch means (ddof 1); the seed limit is refused with the prefix "recoils:".
+
+### A15 (18 Nov 2026, lead): channeling, not done
+
+The owner's option 5 was channeling through an analytic dual-Pearson model with published parameters. The lead
+looked for a published, openly readable parameter set on 18 Nov: the dual-Pearson tables for boron in (100)
+silicon (Tasch et al., J. Electrochem. Soc. 136, 810 (1989)) and the Suzuki et al. database (IEEE Trans.
+Electron Devices 47, 44 (2000)) are behind publishers' paywalls; the implant file shipped with SUPREM-IV.GS
+holds only the 1975 amorphous (single Pearson) tables, the same source as R16; the TU Wien theses found show
+their tables as images without values. No open-source code that models a crystal (channeling) was found
+either (MARLOWE, Crystal-TRIM, IMSIL and MDRANGE are not openly distributed). So nothing is built and no number
+is invented. It can be done when the owner supplies one of the two papers (through the university library):
+the model is a weighted sum of two Pearson IV curves, a few hours of work plus acceptance against the
+paper's own example profiles.

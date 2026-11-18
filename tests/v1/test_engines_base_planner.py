@@ -145,9 +145,10 @@ def test_registry():
     # amended by the lead (contract A7.3): a third engine, rustbca, of the implant family
     assert engines.ENGINES == {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
                                "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
-                               "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine"}
+                               "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine",
+                               "g4implant": "simws.engines.g4implant_engine"}   # amended by the lead (A13.3)
     # amended by the lead (A8.3, A9.3, A11.3)
-    assert engines.names() == ["charon", "devsim", "devsim_eb", "g4see", "ngspice", "rustbca"]
+    assert engines.names() == ["charon", "devsim", "devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3)
     for n in DEVICE_ENGINES:
         mod = engines.module(n)
         assert isinstance(engines.capability(n), Capability)
@@ -250,7 +251,7 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
     pl = plan(p)
     # amended by the lead (A7.3, A8.3, A11.3): engines of the other problem families are refused, one reason each;
     # devsim_eb refuses the Charon problem (Fermi-Dirac statistics)
-    assert sorted(pl.refused) == ["devsim_eb", "g4see", "ngspice", "rustbca"]
+    assert sorted(pl.refused) == ["devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3)
     assert all(len(r) == 1 and r[0].startswith("problem kind:") for e, r in pl.refused.items() if e != "devsim_eb")
     assert pl.primary == "devsim" and pl.checkers == ["charon"]
     assert pl.warnings == {}                            # 300 K is inside both tested ranges
@@ -264,7 +265,7 @@ def test_plan_warnings_only_non_empty(charon_problem):
     from simws.engines.planner import plan
     pl = plan(charon_problem(T=77.0))                   # inside Charon's [77, 300], outside DEVSIM's [250, 400]
     # amended by the lead (A7.3, A8.3, A11.3): other families refuse with one reason; devsim_eb refuses Fermi-Dirac
-    assert sorted(pl.refused) == ["devsim_eb", "g4see", "ngspice", "rustbca"]
+    assert sorted(pl.refused) == ["devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3)
     assert all(len(r) == 1 and r[0].startswith("problem kind:") for e, r in pl.refused.items() if e != "devsim_eb")
     assert list(pl.warnings) == ["devsim"]
 

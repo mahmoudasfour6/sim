@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 MAX_BINS = 5000
 
@@ -28,6 +28,15 @@ class Atom(_M):
     cutoff_eV: float = Field(gt=0)                 # a moving atom slower than this counts as stopped
     surface_binding_eV: float = Field(default=0.0, ge=0)
     bulk_binding_eV: float = Field(default=0.0, ge=0)
+    displacement_eV: Optional[float] = Field(default=None, gt=0)   # A14: a target atom given more than this is
+    #                                                                displaced (a vacancy); needed for damage
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler):
+        d = handler(self)
+        if isinstance(d, dict) and d.get("displacement_eV") is None:   # A14.2: no id changes without it
+            d.pop("displacement_eV", None)
+        return d
 
 
 class Layer(_M):
@@ -78,7 +87,8 @@ class Beam(_M):
 
 class ImplantModels(_M):
     potential: Literal["zbl", "kr_c", "moliere"] = "zbl"
-    electronic_stopping: Literal["lindhard_scharff"] = "lindhard_scharff"
+    electronic_stopping: Literal["lindhard_scharff", "empirical"] = "lindhard_scharff"   # A12: "empirical" = from
+    #                                              measured data, each engine with its own stated source
     recoils: bool = False                          # follow the knocked-on target atoms (needed for damage)
 
 

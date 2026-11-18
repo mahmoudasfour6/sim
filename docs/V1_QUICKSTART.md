@@ -99,8 +99,32 @@ What to keep in mind when reading an implant result:
   come out about 35 % too deep**: this failed its acceptance check and is recorded as a FAIL (contract A7.9);
   boron results carry the flag `implant:known_failure:`. Arsenic has not been checked against anything. Boron
   and arsenic results are flagged `extrapolated:` and `in_range` is False: use them for trends, not for numbers.
-- Every implant result is `unverified`: there is no second implant engine yet to compare with.
-- No damage or vacancy profiles yet, and no beams above 25 keV per nucleon.
+- No beams above 25 keV per nucleon, and no channeling model (A15: no openly published parameters were found).
+
+### Measured stopping, a second engine, damage (contracts A12, A13, A14)
+
+```python
+p = implant_si("B", 50).with_changes({"models.electronic_stopping": "empirical"})   # A12: LS x 1.38 for boron
+r1 = hub.submit("implant.rustbca", params={"problem": implant_si("P", 50)})
+r2 = hub.submit("implant.g4implant", params={"problem": implant_si("P", 50)})       # Geant4, different code
+from simws import compare
+compare.record(hub, compare.compare_results(hub, r1.id, "implant.Rp", r2.id, tolerance=0.10))
+d = hub.submit("implant.rustbca", params={"problem": implant_si("B", 50, n_ions=2000, displacement_eV=36.0)})
+d.q("implant.vacancies_per_ion"), d.q("implant.vacancy_profile"), d.q("implant.vacancy_depth_mean")
+```
+
+- "empirical" stopping (A12) exists for boron in silicon only: Lindhard-Scharff times 1.381 +- 0.195 from the
+  measured points of the IAEA stopping database. The measured sets disagree with each other (Birge ratio 10.9).
+- `g4implant` (A13) is Geant4 with G4ScreenedNuclearRecoil; build it with `bash tools/install_g4implant.sh`. In
+  Lindhard-Scharff mode it uses RustBCA's stopping formula, so a comparison tests the collision codes. Result:
+  boron agrees within 6 to 10 %, phosphorus differs by 13 to 16 % (recorded FAIL). No implant result is
+  `verified` today: boron in Lindhard-Scharff mode is a known failure (agreement on a wrong model does not count),
+  and phosphorus failed the comparison. Geant4's "empirical" stopping missed the 1975 tables by 21 to 32 %.
+- Damage (A14) needs `displacement_eV`; for Geant4 use at least 30 eV (below that its count barely follows Ed,
+  A14.7). There is no default (silicon: 12.5 eV minimum, 36 eV direction average,
+  Holmstrom et al. 2008; 15 eV is common in BCA work). Counts are full cascades without recombination: an upper
+  bound. RustBCA runs damage through its command-line program in 20 batches (memory stays below a few hundred MB).
+- `python tools/v1_implant_verify_demo.py` runs both engines on boron and phosphorus and the damage table.
 
 ## Single-event energy deposition (third problem family, engine G4SEE)
 

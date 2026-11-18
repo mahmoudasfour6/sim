@@ -126,6 +126,9 @@ class ImplantResult(BaseModel):
     depth_um: List[float]                          # one per implanted ion, in launch order: depth below the surface
     lateral_um: List[float]                        # same ions: displacement from the entry point along the axis
     #                                                perpendicular to the plane of incidence
+    vacancy_bin_um: float = 0.0                    # A14.3: with recoils, the depth bin of the vacancy histograms
+    vacancy_batches: List[List[float]] = []        # one histogram (vacancies per depth bin) per batch
+    vacancy_batch_ions: List[int] = []             # ions launched in each batch
     flags: List[str] = []
     diagnostics: Dict[str, Any] = {}               # JSON-serialisable only
 
@@ -147,6 +150,8 @@ class ImplantCapability(BaseModel):
     tested_keV_per_amu: Tuple[float, float]        # runs outside are flagged, not refused
     tested_target_symbols: List[str]
     tested_ion_symbols: List[str] = []             # A7.9: ions the acceptance checks passed for (empty: any ion)
+    tested_ion_symbols_by_stopping: Dict[str, List[str]] = {}   # A12.5: per electronic_stopping mode, replaces
+    #                                                             tested_ion_symbols when the mode is a key
     notes: str = ""
 
     def unsupported(self, problem) -> List[str]:
@@ -161,6 +166,11 @@ class ImplantCapability(BaseModel):
         check("potentials", problem.models.potential, self.potentials)
         check("electronic_stopping", problem.models.electronic_stopping, self.electronic_stopping)
         check("recoils", problem.models.recoils, self.recoils)
+        if problem.models.recoils and True in self.recoils:          # A14.2: damage needs every Ed
+            used = {sym for la in problem.target.layers for sym in la.density_cm3}
+            missing = sorted(a.symbol for a in problem.target.atoms if a.symbol in used and a.displacement_eV is None)
+            if missing:
+                out.append(f"recoils: damage needs displacement_eV for every target atom; missing for {missing}")
         if len(problem.target.layers) > self.max_layers:
             out.append(f"max_layers: {len(problem.target.layers)} > {self.max_layers}")
         e = problem.beam.energy_keV / problem.beam.ion.mass_amu
@@ -179,8 +189,9 @@ class ImplantCapability(BaseModel):
         if any(s not in self.tested_target_symbols for s in syms):
             out.append(f"target: {syms} not all in tested {sorted(self.tested_target_symbols)}")
         ion = problem.beam.ion.symbol
-        if self.tested_ion_symbols and ion not in self.tested_ion_symbols:
-            out.append(f"ion: {_fmt(ion)} not in tested {sorted(self.tested_ion_symbols)}")
+        tested = self.tested_ion_symbols_by_stopping.get(problem.models.electronic_stopping, self.tested_ion_symbols)
+        if tested and ion not in tested:
+            out.append(f"ion: {_fmt(ion)} not in tested {sorted(tested)}")
         return out
 
 
