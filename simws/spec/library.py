@@ -8,11 +8,14 @@ engine-bound builder, so a translator can be checked against the legacy result:
 
 implant_si() is the first entry of the second problem family (contract A7): an ion implant into silicon.
 see_si_slab() is the first entry of the third (contract A8): a particle into a silicon block with a sensitive volume.
+rc_lowpass(), divider() and diode_iv() are circuits (contract A9).
 """
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
+from simws.spec.circuit import (AcSweep, CircuitProblem, DcSweep, Element, Model, Op, Pulse, Transient,
+                                 VerilogA)
 from simws.spec.see import (BeolLayer, EdepHistogram, SeeGeometry, SeePhysics, SeeProblem, SeeSource,
                              SeeStatistics)
 from simws.spec.implant import Atom, Beam, ImplantProblem, Layer, Statistics, Target
@@ -159,3 +162,66 @@ def see_si_slab(particle: str = "alpha", energy_MeV: float = 5.0, sv_thickness_u
                       geometry=geo, physics=SeePhysics(hadronic=hadronic),
                       histogram=EdepHistogram(scale="lin", bins=int(bins), low_MeV=0.0, high_MeV=hi),
                       statistics=SeeStatistics(n_events=int(n_events), seed=int(seed)))
+
+
+# ------------------------------------------------------------------------------------------------- circuits (A9)
+# The Shockley equation (W. Shockley, Bell Syst. Tech. J. 28, 435, 1949) as a Verilog-A model, compiled by OpenVAF.
+SHOCKLEY_VA = """// simws (contract A9.2): ideal diode, I = is * (exp(V / (n Vt)) - 1)
+`include "disciplines.vams"
+module shockley_diode(a, c);
+  inout a, c;
+  electrical a, c;
+  parameter real is = 1e-14 from (0:inf);
+  parameter real n = 1.0 from (0:inf);
+  analog begin
+    I(a, c) <+ is * (limexp(V(a, c) / (n * $vt)) - 1.0);
+  end
+endmodule
+"""
+
+
+def rc_lowpass(R_ohm: float = 1e3, C_F: float = 1e-9, analysis: str = "ac", points_per_decade: int = 10,
+               f_start_Hz: float = 10.0, f_stop_Hz: float = 1e8, step_s: float = 1e-8,
+               stop_s: float = 1e-5) -> CircuitProblem:
+    """First-order RC low-pass: "vin" (in-0), "r1" (in-out), "c1" (out-0); probe v(out). analysis "ac" or "tran"."""
+    if analysis == "ac":
+        src = Element(name="vin", kind="vsource", nodes=["in", "0"], value=0.0, ac=1.0)
+        an = AcSweep(points_per_decade=points_per_decade, f_start_Hz=f_start_Hz, f_stop_Hz=f_stop_Hz)
+    elif analysis == "tran":
+        src = Element(name="vin", kind="vsource", nodes=["in", "0"], value=0.0,
+                      pulse=Pulse(v1=0.0, v2=1.0, delay_s=0.0, rise_s=1e-12, fall_s=1e-12, width_s=1.0,
+                                  period_s=2.0))
+        an = Transient(step_s=step_s, stop_s=stop_s, max_step_s=step_s)
+    else:
+        raise ValueError("analysis: 'ac' or 'tran'")
+    return CircuitProblem(title="RC low-pass", elements=[
+        src, Element(name="r1", kind="resistor", nodes=["in", "out"], value=R_ohm),
+        Element(name="c1", kind="capacitor", nodes=["out", "0"], value=C_F)], analysis=an, probes=["v(out)"])
+
+
+def divider(R1_ohm: float = 1e3, R2_ohm: float = 3e3, V: float = 1.0) -> CircuitProblem:
+    """Resistive divider: "vin" on "in", "r1" (in-mid), "r2" (mid-0); operating point; probes v(mid), i(vin)."""
+    return CircuitProblem(title="divider", elements=[
+        Element(name="vin", kind="vsource", nodes=["in", "0"], value=V),
+        Element(name="r1", kind="resistor", nodes=["in", "mid"], value=R1_ohm),
+        Element(name="r2", kind="resistor", nodes=["mid", "0"], value=R2_ohm)],
+        analysis=Op(), probes=["v(mid)", "i(vin)"])
+
+
+def diode_iv(IS_A: float = 1e-14, N: float = 1.0, start: float = 0.30, stop: float = 0.65, step: float = 0.05,
+             model: str = "builtin", temperature_C: float = 27.0, tnom_C: float = 27.0) -> CircuitProblem:
+    """A diode "d1" (a-0) driven by "vin"; dc sweep of "vin"; probe i(vin) (= minus the diode current).
+    model "builtin": the SPICE diode with is, n only; "va": SHOCKLEY_VA through OpenVAF."""
+    if model == "builtin":
+        m = Model(name="dmod", kind="diode", params={"is": IS_A, "n": N})
+    elif model == "va":
+        m = Model(name="dmod", kind="va", params={"is": IS_A, "n": N},
+                  va=VerilogA(module="shockley_diode", source=SHOCKLEY_VA))
+    else:
+        raise ValueError("model: 'builtin' or 'va'")
+    kind = "diode" if model == "builtin" else "va"
+    return CircuitProblem(title=f"diode I-V ({model})", elements=[
+        Element(name="vin", kind="vsource", nodes=["a", "0"], value=start),
+        Element(name="d1", kind=kind, nodes=["a", "0"], model="dmod")], models=[m],
+        analysis=DcSweep(source="vin", start=start, stop=stop, step=step), probes=["i(vin)"],
+        temperature_C=temperature_C, tnom_C=tnom_C)

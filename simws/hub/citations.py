@@ -15,6 +15,12 @@ from __future__ import annotations
 from typing import Dict, Iterable, List
 
 REGISTRY: Dict[str, dict] = {
+    "ngspice47": dict(type="manual", author="H. Vogt and M. Hendrix and P. Nenzi and D. Warning",
+                      title="Ngspice User's Manual, Version 47", year="2026",
+                      url="https://ngspice.sourceforge.io/docs.html", checked=False),
+    "openvaf": dict(type="misc", author="P. Kuthe and A. Buermen and others",
+                    title="OpenVAF-Reloaded: a Verilog-A compiler for compact models (OSDI 0.3 build osdi_0.3-31-gf47d557)",
+                    year="2024", url="https://fides.fe.uni-lj.si/openvaf/", checked=False),
     "lucsanyi2022": dict(type="article",
                          author="D. Lucsanyi and R. Garcia Alia and K. Bilko and M. Cecchetto and S. Fiore and E. Pirovano",
                          title="G4SEE: A Geant4-Based Single Event Effect Simulation Toolkit and Its Validation Through "

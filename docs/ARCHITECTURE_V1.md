@@ -1176,3 +1176,264 @@ spectrum is the first step of every single-event-effect estimate. It gets its ow
     changes R24 by -0.15 %.
     **R28 is a smoke test whose outcome depends on the seed:** about 2 neutron interactions are expected in the SV
     for 2000 events, so another seed can give none (roughly 15 %). It stays as written (seed 1).
+
+### A9 (18 Nov 2026, lead): circuits as a fourth problem family; engine ngspice with OpenVAF
+
+The device, implant and single-event families answer "what does this piece of silicon do"; a circuit answers
+"what does it do in a circuit". This adds a netlist description, an ngspice translator that can load Verilog-A
+compact models compiled by OpenVAF, and the first link from a device result to a circuit model.
+Owner's instruction for new engines: A5.0 (and "lets go with ... ngspice + openvaf", 18 Nov).
+
+0. **What the lead had already seen when this was written.** (a) The conda-forge ngspice (version 41, the newest
+   there) is built without OSDI: `pre_osdi` and `osdi` are unknown commands, so no OpenVAF model can be loaded
+   into it. (b) ngspice 47 built here from its release tarball with `--enable-osdi` loads models compiled by the
+   OpenVAF-Reloaded build `osdi_0.3-31-gf47d557`. (c) Two trial runs to learn the interfaces: a Verilog-A
+   Shockley diode with is = 1e-14 A, n = 1, swept 0.3 to 0.7 V in 0.1 V steps (printed currents 1.08957e-9 to
+   5.67031e-3 A), and an AC run of that diode with an RC load written as an ASCII raw file. Case (c) overlaps
+   R34 below; its numbers were seen. No other acceptance case had been run. (d) The constants behind the thermal
+   voltage: ngspice 47 uses k = 1.38064852e-23 J/K and q = 1.6021766208e-19 C (`src/include/ngspice/const.h`),
+   OpenVAF k = 1.3806488e-23, q = 1.602176565e-19 (`$vt`); CODATA 2018 k/q differs from ngspice's by 3.4e-7 and
+   from OpenVAF's by 1.0e-7 (relative).
+1. **Description (`simws/spec/circuit.py`, exported from `simws.spec`).** SI units in the field names. All
+   classes forbid unknown fields; every violated rule raises pydantic's `ValidationError`. Names and nodes are
+   case-insensitive, as in SPICE.
+
+   ```python
+   NAME = r"^[A-Za-z][A-Za-z0-9_]*$"
+   NODE = r"^[A-Za-z0-9_]+$"                 # "0" is ground
+
+   class Pulse(_M):
+       v1: float; v2: float
+       delay_s: float = 0.0                   # >= 0
+       rise_s: float; fall_s: float; width_s: float; period_s: float      # each > 0
+
+   class Pwl(_M):
+       points: List[Tuple[float, float]]      # (time s, value); >= 2 points, times >= 0 and strictly increasing
+
+   class Element(_M):
+       name: str                              # NAME; unique among elements (case-insensitive)
+       kind: Literal["resistor", "capacitor", "inductor", "vsource", "isource", "diode", "bjt", "va", "subckt"]
+       nodes: List[str]                       # NODE each; 2 for resistor, capacitor, inductor, vsource, isource,
+                                              # diode (anode, cathode); 3 or 4 for bjt (c, b, e[, substrate]);
+                                              # >= 1 for va and subckt
+       value: Optional[float] = None          # required and > 0 for resistor (ohm), capacitor (F), inductor (H);
+                                              # optional DC value for sources (V or A, default 0); else forbidden
+       ac: Optional[float] = None             # sources only: AC magnitude, phase 0
+       pulse: Optional[Pulse] = None          # sources only
+       pwl: Optional[Pwl] = None              # sources only; not together with pulse
+       model: Optional[str] = None            # required for diode, bjt, va (a Model name) and subckt (a subcircuit
+                                              # name from a library); forbidden for the other kinds
+       params: Dict[str, float] = {}          # instance parameters, e.g. {"area": 2.0}, {"Nx": 1}
+
+   class VerilogA(_M):
+       module: str                            # NAME; the source must contain "module <module>"
+       source: str                            # the Verilog-A text, not empty
+
+   class Model(_M):
+       name: str                              # NAME; unique among models (case-insensitive)
+       kind: Literal["diode", "npn", "pnp", "va"]
+       params: Dict[str, float] = {}
+       va: Optional[VerilogA] = None          # required when kind == "va", forbidden otherwise
+
+   class Library(_M):
+       path: str                              # a model library file; "~" is expanded when it is run
+       section: Optional[str] = None          # ".lib path section" when given, ".include path" otherwise
+
+   class Op(_M):        kind: Literal["op"] = "op"
+   class DcSweep(_M):   kind: Literal["dc"] = "dc"; source: str; start: float; stop: float; step: float
+                        # source: a vsource or isource; step != 0 with the sign of stop - start;
+                        # 2 <= number of points <= 100001
+   class AcSweep(_M):   kind: Literal["ac"] = "ac"; points_per_decade: int; f_start_Hz: float; f_stop_Hz: float
+                        # 1 <= points_per_decade <= 1000; 0 < f_start_Hz < f_stop_Hz
+   class Transient(_M): kind: Literal["tran"] = "tran"; step_s: float; stop_s: float
+                        max_step_s: Optional[float] = None      # 0 < step_s < stop_s; max_step_s > 0 when given
+
+   class CircuitNumerics(_M):
+       reltol: float = 1e-6                   # 1e-9 <= reltol <= 1e-2
+       abstol_A: float = 1e-15                # > 0
+       vntol_V: float = 1e-9                  # > 0
+       gmin_S: float = 1e-15                  # >= 0
+
+   class CircuitProblem(_M):
+       spec_version: str = "1.0"
+       kind: Literal["circuit"] = "circuit"
+       title: str = "simws circuit"
+       elements: List[Element]                # >= 1; at least one element has the node "0"
+       models: List[Model] = []
+       libraries: List[Library] = []
+       analysis: Union[Op, DcSweep, AcSweep, Transient]          # chosen by "kind"
+       probes: List[str]                      # >= 1; "v(<node>)", "v(<node>,<node>)" or "i(<vsource name>)";
+                                              # every node appears in an element, every i() names a vsource
+       temperature_C: float = 27.0            # > -273.15
+       tnom_C: float = 27.0                   # > -273.15: the temperature at which model parameters are given
+       numerics: CircuitNumerics = CircuitNumerics()
+       def problem_id(self) -> str: ...
+       def with_changes(self, changes) -> "CircuitProblem": ...
+   ```
+
+   Further rules: every diode, bjt or va element names a Model of kind diode, npn or pnp, va respectively (a bjt
+   takes npn or pnp); a subckt element needs at least one Library. `simws.spec.family(problem)` returns
+   `"circuit"` for a `CircuitProblem`.
+2. **Library (`simws.spec.library`).** `SHOCKLEY_VA`: the Verilog-A text of an ideal diode, module
+   `shockley_diode`, parameters `is` (A, default 1e-14) and `n` (default 1), `I(a, c) <+ is * (limexp(V(a, c) /
+   (n * $vt)) - 1)` (the Shockley equation, W. Shockley, Bell Syst. Tech. J. 28, 435, 1949).
+   `rc_lowpass(R_ohm=1e3, C_F=1e-9, analysis="ac", points_per_decade=10, f_start_Hz=10.0, f_stop_Hz=1e8,
+   step_s=1e-8, stop_s=1e-5)`: source "vin" between node "in" and "0", resistor "r1" from "in" to "out",
+   capacitor "c1" from "out" to "0", probe "v(out)"; for "ac" the source has ac 1 and DC 0; for "tran" it has
+   pulse v1 0, v2 1, delay 0, rise and fall 1e-12 s, width 1 s, period 2 s, and the transient has max_step_s =
+   step_s. `divider(R1_ohm=1e3, R2_ohm=3e3, V=1.0)`: "vin" on node "in", "r1" from "in" to "mid", "r2" from "mid"
+   to "0", op, probes "v(mid)" and "i(vin)". `diode_iv(IS_A=1e-14, N=1.0, start=0.30, stop=0.65, step=0.05,
+   model="builtin", temperature_C=27.0, tnom_C=27.0)`: source "vin" on node "a", diode "d1" from "a" to "0" with
+   model "dmod" (kind diode, params {"is": IS_A, "n": N}) when model is "builtin", or kind va with `SHOCKLEY_VA`
+   (params {"is": IS_A, "n": N}) when model is "va"; dc sweep of "vin"; probe "i(vin)".
+3. **Engine layer (`simws/engines/base.py`, additive).**
+
+   ```python
+   class CircuitResult(BaseModel):            # forbids unknown fields
+       engine: str
+       problem_id: str
+       analysis: Literal["op", "dc", "ac", "tran"]
+       axis_name: str = ""                    # dc: the swept source; ac: "f"; tran: "t"; op: ""
+       axis_unit: str = ""                    # "V" or "A" (dc), "Hz", "s"; "" for op
+       axis: List[float] = []
+       signals: Dict[str, List[float]]        # probe (as written in the description) -> values (real part for ac)
+       signals_imag: Dict[str, List[float]] = {}     # ac only
+       units: Dict[str, str]                  # probe -> "V" or "A"
+       flags: List[str] = []
+       diagnostics: Dict[str, Any] = {}
+
+   class CircuitCapability(BaseModel):        # forbids unknown fields; every list holds the ALLOWED values
+       engine: str; env: str; description: str; in_process: bool
+       element_kinds: List[str]; model_kinds: List[str]; analyses: List[str]; max_elements: int
+       tested_element_kinds: List[str]; tested_analyses: List[str]
+       tested_temperature_C: Tuple[float, float]
+       notes: str = ""
+       def unsupported(self, problem) -> List[str]: ...
+       def outside_tested_range(self, problem) -> List[str]: ...
+   ```
+
+   `unsupported`: reasons starting with `"element_kinds:"`, `"model_kinds:"`, `"analyses:"`, `"max_elements:"`.
+   `outside_tested_range` (bounds included): `"element_kinds:"` when an element kind is not tested,
+   `"analyses:"`, `"temperature_C:"`, and `"libraries:"` whenever the problem uses a library (its content is not
+   part of the description, so it is never "tested"). Registry: `ENGINES` gains
+   `"ngspice": "simws.engines.ngspice_engine"`, `FAMILY = "circuit"`, adapter "circuit.ngspice"; the A7.3 rules
+   on families apply.
+4. **ngspice translation (`simws/engines/ngspice_engine.py`; `FAMILY = "circuit"`).** ngspice 47 built with OSDI
+   (Holger Vogt, Marcel Hendrix, Paolo Nenzi, Dietmar Warning, "Ngspice User's Manual, Version 47"), and
+   OpenVAF-Reloaded `osdi_0.3-31-gf47d557` (P. Kuthe, A. Buermen et al.; OSDI 0.3 output, which every ngspice
+   from 39 on loads), both run as executables. Where they are: the conda env prefix in `SIMWS_SPICE_PREFIX`,
+   else `<envs_root>/spice`; `<prefix>/bin/ngspice` and `<prefix>/bin/openvaf`. Module functions: `available()`
+   (ngspice executable present), `openvaf_available()`, `unsupported(problem)`, `build_netlist(problem,
+   osdi=None) -> str` (pure; `osdi` maps a Verilog-A module name to its compiled file), `compile_va(va, cache_dir)
+   -> Path`, `parse_raw(path) -> dict`, `run(problem, workdir) -> CircuitResult`.
+   Capability: element_kinds all nine; model_kinds all four; analyses ["op", "dc", "ac", "tran"];
+   max_elements 10000; tested_element_kinds ["resistor", "capacitor", "vsource", "diode", "va", "subckt"];
+   tested_analyses ["op", "dc", "ac", "tran"]; tested_temperature_C (26.85, 27.0) (the cases of R30 to R36);
+   env "spice"; in_process False.
+   Netlist: the title line; one `.lib "<path>" <section>` or `.include "<path>"` per library (path expanded);
+   one line per element, its SPICE name being a kind letter, an underscore and the description name (`R_r1`,
+   `C_`, `L_`, `V_`, `I_`, `D_`, `Q_`, `N_` for va, `X_` for subckt), then the nodes, then the value, model or
+   subcircuit name, then `key=value` for each instance parameter; a source writes `DC <value>`, `AC <ac>` when
+   given, and `PULSE(v1 v2 delay rise fall width period)` or `PWL(t1 v1 t2 v2 ...)`; one `.model <name>
+   <D|NPN|PNP|module>(key=value ...)` per model; `.options reltol=.. abstol=.. vntol=.. gmin=.. temp=..
+   tnom=..` from the numerics and temperatures; a `.control` block with `pre_osdi <file>` per Verilog-A model,
+   `set filetype=ascii`, the analysis (`op`; `dc V_<src> start stop step`; `ac dec n f_start f_stop`;
+   `tran step stop 0 max_step`), `write result.raw` with the probes translated to ngspice names (`v(node)`,
+   `v(a,b)`, `i(V_<src>)`), then `.endc` and `.end`.
+   Verilog-A models are compiled by OpenVAF into a cache `<SIMWS_CACHE or ~/.cache/simws>/osdi/<key>/` where the
+   key is the SHA-256 of the OpenVAF identity (the SHA-256 of its executable) and the source; a second run with
+   the same source reuses the file (diagnostics `osdi_cached` True). `run` raises `EngineNotAvailable` when
+   ngspice, or (for a Verilog-A model) OpenVAF, is missing; `Unsupported` as the other engines; and
+   `RuntimeError` with the last 20 lines of the ngspice log when ngspice fails or writes no raw file. Current
+   probes keep the SPICE sign: `i(<vsource>)` is the current that enters the source at its first node and
+   leaves at its second. Every result whose problem uses a library carries a flag
+   `"circuit:external_library: <expanded path> sha256 <first 12 hex digits>"` per library.
+5. **Adapter `circuit.ngspice`** (`simws/adapters/circuit.py`: base `CircuitAdapter`, subclass
+   `CircuitNgspice`; manifest version "1.0", env "tcad", inputs ["problem"], citations "ngspice47" and
+   "openvaf"). Invalid description, refused problem and missing engine as in A7.5. Quantities, one per probe:
+   `circuit.v.<node>` or `circuit.v.<node1>-<node2>` (unit V), `circuit.i.<source>` (unit A), names in lower
+   case; scalars for op; for dc, ac and tran an axis `{"name": <dc source name in lower case> | "f" | "t", "unit":
+   "V" | "A" | "Hz" | "s"}`; for ac four quantities per probe with the suffixes `.re`, `.im`, `.mag` (same unit)
+   and `.phase` (rad, numpy.angle). Plus the declared output `circuit.n_points` (dimensionless: the number of
+   analysis points; 1 for op). No uncertainty is attached (a deterministic solve; its error is set by the
+   numerics); the result carries the flag `"budget:none"`. Self-check (status `check_failed`): a non-finite
+   value; for dc, a number of points different from the description's. Each `outside_tested_range` string s
+   gives `"extrapolated:" + s`.
+6. **Device to circuit, first link (`simws/chain/diode.py`).** `fit_shockley(V, J, T_K)` fits ln J = ln Js +
+   q V / (N k T) by least squares over all given points (V in volts, J in A/m^2, all J > 0; CODATA 2018 k and
+   q) and returns `{"Js_A_m2", "N", "T_K", "max_rel_residual"}`, the residual being max |J_fit / J - 1|.
+   `circuit_from_fit(fit, area_m2=1e-12, start, stop, step)` returns `diode_iv(IS_A = Js x area, N, start,
+   stop, step, model="builtin", temperature_C = tnom_C = T_K - 273.15)`. Choosing the area is a modelling choice
+   (currents scale with it); the temperature must equal the device's, and `tnom_C` must equal it too, or ngspice
+   rescales IS with temperature.
+7. **Limits, stated.** No noise, distortion, sensitivity or pole-zero analyses; one analysis per problem; AC
+   phase 0 only; no subcircuit definitions in the description itself (only from libraries). Trust stays
+   "unverified": R30 to R34 compare with closed forms (code verification of the translation), and no second
+   circuit engine is connected.
+8. **Acceptance (tolerances fixed here, before any of these runs).** Library problems with their defaults
+   unless stated. Closed forms use CODATA 2018 k and q.
+   R30 (divider): `divider()`: v(mid) within 1e-9 V of 0.75 V and i(vin) within 1e-12 A of -2.5e-4 A.
+   R31 (RC, AC): `rc_lowpass()`: at every point the frequency is within 1e-9 relative of 10^(1 + k/10) Hz,
+   |v(out)| within 1e-6 relative of 1/sqrt(1 + (2 pi f R C)^2) and its phase within 1e-6 rad of
+   -atan(2 pi f R C).
+   R32 (RC, transient): `rc_lowpass(analysis="tran")`: at every output time t, |v(out) - (1 - exp(-t / (R C)))|
+   <= 1e-3 V.
+   R33 (built-in diode): `diode_iv()`: at every point -i(vin) within 1e-4 relative of IS (exp(q V / (N k T)) -
+   1), T = 300.15 K.
+   R34 (Verilog-A diode through OpenVAF): `diode_iv(model="va")`: the same, within 1e-4 relative.
+   R35 (device to circuit): `pn_diode_1d(V=[0.30, 0.35, ..., 0.60])` through `device.devsim`; `fit_shockley` on
+   its anode current density; `circuit_from_fit(fit, start=0.30, stop=0.60, step=0.05)` through
+   `circuit.ngspice`: at every point -i(vin) within 1e-4 relative of Js x area x (exp(q V / (N k T)) - 1).
+   Reported, not gated: N, Js, and the largest relative difference between the circuit current / area and the
+   DEVSIM current density (how well an ideal Shockley diode describes this device).
+   R36 (foundry model, regression; skipped when the IHP SG13G2 PDK is not at
+   `~/sim_workspace/ihp_sg13g2_pdk`): the legacy Gummel set-up of `benchmarks/ihp_npn13g2_baseline` (library
+   `cornerHBT.lib` section `hbt_typ`, subckt `npn13G2` with Nx = 1, collector and base at 0 V, emitter swept
+   from -0.35 V to -1.02 V in -0.005 V steps): the peak of I_C / I_B over 1 uA < I_C < 5 mA within 1 % of 800.17,
+   and V_BE at the point with I_C nearest 1 uA within 0.0051 V of 0.665 V (the stored legacy result, made with
+   another ngspice version and the same model; a regression check, not an independent one).
+   R37 (cache and repeatability): running `diode_iv(model="va")` twice gives identical signals, and the second
+   run reports `osdi_cached` True.
+   Why these tolerances: R30, R31 and R33 to R35 are solved to reltol 1e-6 and differ from the closed forms only by
+   the solver tolerance and the constants of 0d (at most 1e-5 relative at 0.65 V); a wrong element value, unit,
+   temperature or sign fails them by far more. R32 is a time integration: 1e-3 V is 0.1 % of the step, while a
+   1 % error in R C gives 3.7e-3 V. R36 allows the change between ngspice versions, not a change of model.
+9. **Laptop install.** `tools/install_spice.sh` creates a conda env `spice` (conda-forge c-compiler,
+   cxx-compiler and make), downloads ngspice 47 from SourceForge (SHA-256
+   894e649651f1838a14095e5a5439e7d3aa63e87ede14d283173fda4fcdef675f), builds it with `--enable-osdi` into that
+   env, and puts OpenVAF-Reloaded `osdi_0.3-31-gf47d557` from https://fides.fe.uni-lj.si/openvaf/download/
+   (SHA-256 9bc343d52e00529ddba452b90358cdd14da14ec7437d75dec2dbd621eda54bc8) into the env as `openvaf`. It does
+   not touch the `eda` or `tcad` envs or the OpenVAF already in the workspace. Engine tests are skipped where
+   ngspice is not available.
+10. **Correction during implementation (18 Nov, before any acceptance run).** A9.4 said every model is written
+    `.model <name> <type>(key=value ...)`. For an OSDI (Verilog-A) model ngspice 47 then loses the first parameter:
+    a smoke run (not an acceptance case: is = 2e-14 A, n = 1.1, 0.4 V) gave the current of the default
+    is = 1e-14 A, and `showmod` listed is = 1e-14. Written without parentheses, `.model <name> <module> key=value
+    ...`, both parameters arrive. Verilog-A models are written that way; built-in models keep the parentheses.
+11. **After the checker's report (18 Nov).** The checker wrote 445 tests from the text of A9 alone; 431 passed,
+    R36 was skipped (no IHP PDK on the build machine). Acceptance: R30 to R34 and R37 passed (worst differences:
+    R30 0; R31 |H| 5.6e-16, phase 2.2e-16 rad; R32 2.9e-6 V; R33 8.5e-6; R34 2.6e-6, all at 0.65 V; R37 identical
+    signals, cache used on the second run).
+    **Recorded FAIL: R35.** The circuit current differs from the fitted Shockley diode by 1.84e-3 at 0.30 V
+    (gate 1e-4): ngspice puts gmin (1e-15 S, the description's default) across every junction, and with
+    IS = Js x area = 2.6e-18 A the gmin current (gmin x 0.3 V = 3.0e-16 A) is 0.18 % of the diode current. The
+    reasoning in A9.8 left gmin out. The gate is unchanged; R35 stays in the suite, run as specified, as an
+    expected failure. Reported values of R35: N = 1.0514, Js = 2.6308e-6 A/m^2; an ideal Shockley diode differs
+    from the DEVSIM diode by up to 16 % over 0.30 to 0.60 V (model-form error).
+    **Change made because of the FAIL (after the result, so listed here):** `circuit_from_fit` takes
+    `gmin_S: float = 0.0` and sets the problem's `numerics.gmin_S` to it, so the circuit holds the fitted diode
+    and nothing else. *Post hoc* R35b: the same link with that default, same 1e-4 gate (the checker's diagnostic
+    run gave 7.5e-6).
+    **Defects fixed:** the dc axis name is now put in lower case by the adapter (it passed the description's
+    case through); a non-finite probe value made the store refuse the result before the self-check could mark
+    it, so such a probe is now left out of the quantities and the self-check fails the result (`check_failed`,
+    message "<probe>: non-finite values"); `compile_va` returns the path, as A9.4 says (it returned a pair).
+    **Correction to the text, chosen by the lead:** `fit_shockley`'s `max_rel_residual` compares the data with
+    the fitted line, J_fit = Js exp(q V / (N k T)), without the -1 (the -1 changed it by 1e-5 on exact data).
+    **Clarifications:** the number of dc points is round((stop - start) / step) + 1. `parse_raw` returns
+    {"plotname", "complex", "names" (lower case, in file order), "types", "values" (one list per point, one
+    entry per variable; complex numbers for an AC plot)}. `compile_va(va, cache_dir)`: `cache_dir` replaces the
+    cache root `<SIMWS_CACHE or ~/.cache/simws>/osdi`, and the file is `<cache_dir>/<key>/<module>.osdi` with
+    key = SHA-256 of (SHA-256 of the executable, a newline, the source). A transient without `max_step_s` uses
+    `step_s` as the maximum step. `CircuitResult.axis_name` for dc is the description's source name; the
+    adapter writes it in lower case. `problem_id` uses the same recipe as `Problem.problem_id`.

@@ -280,7 +280,7 @@ def test_plan_see_problem():
     pl = plan(p)
     assert pl.problem_id == p.problem_id()
     assert pl.primary == "g4see" and pl.checkers == []
-    assert set(pl.refused) == {"devsim", "charon", "rustbca"}
+    assert set(pl.refused) == {"devsim", "charon", "rustbca", "ngspice"}   # amended by the lead (A9.3): fifth engine
     for n in ("devsim", "charon", "rustbca"):
         assert len(pl.refused[n]) == 1 and pl.refused[n][0].startswith("problem kind:")
     assert pl.warnings == {}

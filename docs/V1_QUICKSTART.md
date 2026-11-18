@@ -132,11 +132,34 @@ What to keep in mind:
 - The checks so far (alphas and protons, 5 to 10 MeV, silicon) test the set-up against the NIST tables, which
   Geant4 shares; every result is `unverified` because there is no second, independent single-event code yet.
 
+## Circuits (fourth problem family, engine ngspice with OpenVAF)
+
+A circuit is a netlist (resistors, capacitors, sources, diodes, transistors, Verilog-A models, foundry model
+libraries), one analysis (op, dc, ac or tran) and the probes to report. It needs the circuit engine once:
+`bash tools/install_spice.sh` (a separate conda env `spice` with ngspice 47 built with OSDI, and OpenVAF; the
+ngspice on conda-forge cannot load OpenVAF models).
+
+```python
+from simws.spec.library import rc_lowpass, diode_iv, SHOCKLEY_VA
+r = hub.submit("circuit.ngspice", params={"problem": rc_lowpass()})        # AC of an RC low-pass
+r.q("circuit.v.out.mag"), r.q("circuit.v.out.phase")                       # axis "f" in Hz
+r = hub.submit("circuit.ngspice", params={"problem": diode_iv(model="va")}) # a Verilog-A diode via OpenVAF
+r.q("circuit.i.vin")                     # SPICE sign: the current entering the source at its first node
+```
+
+Device to circuit: `simws.chain.diode.fit_shockley` fits an ideal diode to a DEVSIM I-V and
+`circuit_from_fit` makes the matching ngspice problem; `python tools/v1_circuit_demo.py` runs both and shows
+how far the ideal diode is from the TCAD device.
+
+What to keep in mind: no uncertainty is attached to circuit results (flag `budget:none`); results that use a
+foundry library carry its file's SHA-256 in a flag, because the library is not part of the description; every
+circuit result is `unverified` (no second circuit engine yet).
+
 ## What is not in v1
 
 - DEVSIM translator limits: one silicon region (with Ge grading), ohmic contacts; equilibrium, DC sweeps and
   two-port small-signal analysis. Noise, strikes, Schottky contacts, MOS and SiC are still only in the legacy
   modules. Mesh error bars exist for DC results, not for AC.
 - Charon runs one case: the 1D abrupt pn diode.
-- Implantation and single events: see the limits above.
+- Implantation, single events and circuits: see the limits above.
 - The 23 workflow scripts that bypass the hub are unchanged.

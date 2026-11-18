@@ -249,3 +249,68 @@ class SeeCapability(BaseModel):
         if problem.physics.hadronic not in self.tested_hadronic:
             out.append(f"hadronic: {_fmt(problem.physics.hadronic)} not in tested {self.tested_hadronic}")
         return out
+
+
+# ---------------------------------------------------------------------------------------------------- circuits (A9)
+class CircuitResult(BaseModel):
+    """Engine-neutral result of a CircuitProblem (contract A9.3): the probes over the analysis axis."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    problem_id: str
+    analysis: Literal["op", "dc", "ac", "tran"]
+    axis_name: str = ""
+    axis_unit: str = ""
+    axis: List[float] = []
+    signals: Dict[str, List[float]]                # probe as written in the description -> values (real part for ac)
+    signals_imag: Dict[str, List[float]] = {}
+    units: Dict[str, str]
+    flags: List[str] = []
+    diagnostics: Dict[str, Any] = {}
+
+
+class CircuitCapability(BaseModel):
+    """What a circuit engine's translator can run. Every list holds the ALLOWED values."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    env: str
+    description: str
+    in_process: bool
+    element_kinds: List[str]
+    model_kinds: List[str]
+    analyses: List[str]
+    max_elements: int
+    tested_element_kinds: List[str]
+    tested_analyses: List[str]
+    tested_temperature_C: Tuple[float, float]
+    notes: str = ""
+
+    def unsupported(self, problem) -> List[str]:
+        out: List[str] = []
+        ek = sorted({e.kind for e in problem.elements} - set(self.element_kinds))
+        if ek:
+            out.append(f"element_kinds: {ek} not in {self.element_kinds}")
+        mk = sorted({m.kind for m in problem.models} - set(self.model_kinds))
+        if mk:
+            out.append(f"model_kinds: {mk} not in {self.model_kinds}")
+        if problem.analysis.kind not in self.analyses:
+            out.append(f"analyses: {_fmt(problem.analysis.kind)} not in {self.analyses}")
+        if len(problem.elements) > self.max_elements:
+            out.append(f"max_elements: {len(problem.elements)} > {self.max_elements}")
+        return out
+
+    def outside_tested_range(self, problem) -> List[str]:
+        out: List[str] = []
+        ek = sorted({e.kind for e in problem.elements} - set(self.tested_element_kinds))
+        if ek:
+            out.append(f"element_kinds: {ek} not in tested {self.tested_element_kinds}")
+        if problem.analysis.kind not in self.tested_analyses:
+            out.append(f"analyses: {_fmt(problem.analysis.kind)} not in tested {self.tested_analyses}")
+        lo, hi = self.tested_temperature_C
+        if not lo <= problem.temperature_C <= hi:
+            out.append(f"temperature_C: {problem.temperature_C:g} outside tested [{lo:g}, {hi:g}]")
+        if problem.libraries:
+            out.append(f"libraries: {len(problem.libraries)} model librar{'y' if len(problem.libraries) == 1 else 'ies'}"
+                       f" outside the description (their content is never tested)")
+        return out

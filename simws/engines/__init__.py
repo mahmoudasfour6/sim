@@ -8,7 +8,8 @@ from typing import Dict, List
 from simws.engines.base import Capability
 
 ENGINES: Dict[str, str] = {"devsim": "simws.engines.devsim_engine", "charon": "simws.engines.charon_engine",
-                           "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine"}
+                           "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
+                           "ngspice": "simws.engines.ngspice_engine"}
 
 
 def names() -> List[str]:
