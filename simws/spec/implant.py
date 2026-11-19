@@ -57,7 +57,7 @@ class Layer(_M):
 class Target(_M):
     atoms: List[Atom] = Field(min_length=1)
     layers: List[Layer] = Field(min_length=1)      # the beam side first
-    structure: Literal["amorphous"] = "amorphous"
+    structure: Literal["amorphous", "crystalline_si_100"] = "amorphous"   # A15: (100) silicon crystal (channeling)
 
     @model_validator(mode="after")
     def _consistent(self):
@@ -83,6 +83,14 @@ class Beam(_M):
     energy_keV: float = Field(gt=0)
     tilt_deg: float = Field(default=0.0, ge=0, lt=90)        # from the surface normal
     dose_cm2: Optional[float] = Field(default=None, gt=0)
+    rotation_deg: Optional[float] = Field(default=None, ge=0, lt=360)   # A15: twist about the normal (crystals)
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler):
+        d = handler(self)
+        if isinstance(d, dict) and d.get("rotation_deg") is None:      # A15.4: no id changes without it
+            d.pop("rotation_deg", None)
+        return d
 
 
 class ImplantModels(_M):

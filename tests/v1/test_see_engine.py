@@ -280,7 +280,7 @@ def test_plan_see_problem():
     pl = plan(p)
     assert pl.problem_id == p.problem_id()
     assert pl.primary == "g4see" and pl.checkers == []
-    assert set(pl.refused) == {"devsim", "charon", "rustbca", "ngspice", "devsim_eb", "g4implant"}   # amended by the lead (A9.3, A11.3, A13.3)
+    assert set(pl.refused) == {"devsim", "charon", "rustbca", "ngspice", "devsim_eb", "g4implant", "channeling"}   # amended by the lead (A9.3, A11.3, A13.3, A15.5)
     for n in ("devsim", "charon", "rustbca"):
         assert len(pl.refused[n]) == 1 and pl.refused[n][0].startswith("problem kind:")
     assert pl.warnings == {}

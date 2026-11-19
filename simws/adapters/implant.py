@@ -233,3 +233,89 @@ class ImplantG4implant(ImplantAdapter):
         verification={"statistics": "split halves: the range of the first and second half of the ions agree "
                                     "within 4 standard errors"},
         inputs=["problem"], outputs=_OUTPUTS, citations=["geant4_2016", "mendenhall2005"])
+
+
+_CHANNELING_OUTPUTS = [
+    OutputSpec(name="implant.Rp", unit="m", constraint="positive",
+               description="mean depth of the whole as-implanted profile (main and channeled parts)"),
+    OutputSpec(name="implant.dRp", unit="m", constraint="positive", description="standard deviation of that profile"),
+    OutputSpec(name="implant.profile", unit="1/m", constraint="nonnegative",
+               description="density per implanted ion and per metre of depth, on the axis 'depth'"),
+    OutputSpec(name="implant.concentration", unit="1/m**3", constraint="nonnegative",
+               description="dose x profile: the as-implanted concentration"),
+    OutputSpec(name="implant.channeled_fraction", unit="dimensionless", constraint="nonnegative",
+               description="share of the dose in the channeling component (A15)"),
+]
+
+
+class ImplantChanneling(Adapter):
+    """A15.5: the published channeling fits as a hub job. Uncertainty: reading of the papers' figures."""
+    ENGINE = "channeling"
+    manifest = Manifest(
+        name="implant.channeling", version="1.0", env="tcad", engine="channeling", engine_version="A15",
+        description="As-implanted profiles in crystalline (100) silicon with channeling, from published fits "
+                    "(boron: Tasch et al. 1989; arsenic: Suzuki et al. 2000)",
+        verification={"model": "evaluated at the figure values moved by their reading uncertainty; half the spread "
+                               "is the reported sigma"},
+        inputs=["problem"], outputs=_CHANNELING_OUTPUTS, citations=["tasch1989", "suzuki2000"])
+
+    def resolve(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(params)
+        out["problem"] = _problem(params).model_dump(mode="json")
+        return out
+
+    def prepare(self, job, ctx) -> None:
+        super().prepare(job, ctx)
+        from simws import engines
+        reasons = engines.unsupported(self.ENGINE, _problem(job.key.params))
+        if reasons:
+            raise InvalidInput(f"unsupported by {self.ENGINE}: " + "; ".join(reasons))
+
+    def run(self, job, ctx):
+        from simws import engines
+        from simws.engines.base import Unsupported
+        problem = _problem(job.key.params)
+        mod = engines.module(self.ENGINE)
+        try:
+            res = mod.run(problem, ctx.staging)
+        except Unsupported as e:
+            raise InvalidInput(f"unsupported by {self.ENGINE}: " + "; ".join(e.reasons)) from e
+        return {"result": res, "problem": problem, "outside": mod.CAPABILITY.outside_tested_range(problem)}
+
+    def collect(self, job, ctx, raw):
+        res, problem = raw["result"], raw["problem"]
+        ctx.flags += [f for f in res.flags if f not in ctx.flags]
+        ctx.flags += ["extrapolated:" + s for s in raw["outside"]]
+        ctx.diagnostics.update({"problem_id": problem.problem_id(), "engine": res.engine,
+                                "ion": problem.beam.ion.symbol, "energy_keV": problem.beam.energy_keV,
+                                "dose_cm2": problem.beam.dose_cm2, "tilt_deg": problem.beam.tilt_deg,
+                                "rotation_deg": problem.beam.rotation_deg, **res.diagnostics})
+
+        def q(name, value, unit, sigma, axes=None):
+            qq = ctx.quantity(name, value, unit, sigma=sigma, axes=axes)
+            qq.uncertainty.components["digitisation"] = qq.uncertainty.sigma
+            return qq
+
+        prof = np.asarray(res.profile_per_um, float) / UM           # 1/um -> 1/m
+        sig = np.asarray(res.profile_sigma_per_um, float) / UM
+        axes = [{"name": "depth", "unit": "m", "values": (np.asarray(res.profile_um, float) * UM).tolist()}]
+        dose = problem.beam.dose_cm2 * 1e4
+        d = res.diagnostics
+        return [q("implant.Rp", d["Rp_um"] * UM, "m", d["Rp_sigma_um"] * UM),
+                q("implant.dRp", d["dRp_um"] * UM, "m", d["dRp_sigma_um"] * UM),
+                q("implant.profile", prof.tolist(), "1/m", sig.tolist(), axes=axes),
+                q("implant.concentration", (dose * prof).tolist(), "1/m**3", (dose * sig).tolist(), axes=axes),
+                q("implant.channeled_fraction", float(res.channeled_fraction), "dimensionless",
+                  float(res.channeled_fraction_sigma or 0.0))]
+
+    def self_check(self, job, ctx, qs) -> List[str]:
+        out: List[str] = []
+        prof = next(q for q in qs if q.name == "implant.profile")
+        vals = np.asarray(prof.array(), float)
+        x = np.asarray(prof.axes[0].values, float)
+        b = float(x[1] - x[0]) if x.size > 1 else 1.0
+        total = float(vals.sum() * b)
+        lost = float(ctx.diagnostics.get("share_beyond_target", 0.0))
+        if abs(total + lost - 1.0) > 1e-3:
+            out.append(f"normalisation: the profile integrates to {total:.6f} (+ {lost:.2e} beyond the target), not 1")
+        return out

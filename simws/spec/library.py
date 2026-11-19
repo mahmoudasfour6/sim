@@ -147,22 +147,27 @@ SI_SURFACE_BINDING_EV, SI_CUTOFF_EV, SI_BULK_BINDING_EV = 4.72, 1.5, 0.0
 
 def implant_si(ion: str = "P", energy_keV: float = 100.0, tilt_deg: float = 0.0, dose_cm2: Optional[float] = None,
                thickness_um: float = 2.0, n_ions: int = 20000, seed: int = 1,
-               displacement_eV: Optional[float] = None) -> ImplantProblem:
+               displacement_eV: Optional[float] = None, crystal: bool = False,
+               rotation_deg: Optional[float] = None) -> ImplantProblem:
     """An ion implant into one layer ("si") of amorphous silicon. ion: "B" (11B), "P" (31P) or "As" (75As).
     Amorphous means no channeling: a crystalline wafer shows a deeper tail than this description can give.
     displacement_eV (contract A14): given, the silicon atom gets it and the recoils are followed (damage). There
     is no default: 12.5 eV is silicon's minimum and 36 eV its direction average (Holmstrom, Kuronen and Nordlund,
-    Phys. Rev. B 78, 045202, 2008); 15 eV is a value common in BCA work."""
+    Phys. Rev. B 78, 045202, 2008); 15 eV is a value common in BCA work.
+    crystal (contract A15): a (100) silicon crystal, for the channeling engine; it needs tilt_deg 7 and
+    rotation_deg 30 (boron) or 22 (arsenic), and a dose."""
     if ion not in IMPLANT_IONS:
         raise ValueError(f"unknown ion '{ion}'; known ions: {sorted(IMPLANT_IONS)}")
     Z, m = IMPLANT_IONS[ion]
     beam = Beam(ion=Atom(symbol=ion, Z=Z, mass_amu=m, cutoff_eV=SI_CUTOFF_EV, surface_binding_eV=0.0),
-                energy_keV=float(energy_keV), tilt_deg=float(tilt_deg), dose_cm2=dose_cm2)
+                energy_keV=float(energy_keV), tilt_deg=float(tilt_deg), dose_cm2=dose_cm2,
+                rotation_deg=None if rotation_deg is None else float(rotation_deg))
     si = Atom(symbol="Si", Z=14, mass_amu=SI_MASS_AMU, cutoff_eV=SI_CUTOFF_EV,
               surface_binding_eV=SI_SURFACE_BINDING_EV, bulk_binding_eV=SI_BULK_BINDING_EV,
               displacement_eV=None if displacement_eV is None else float(displacement_eV))
     target = Target(atoms=[si], layers=[Layer(name="si", thickness_um=float(thickness_um),
-                                              density_cm3={"Si": SI_DENSITY_CM3})])
+                                              density_cm3={"Si": SI_DENSITY_CM3})],
+                    structure="crystalline_si_100" if crystal else "amorphous")
     models = ImplantModels(recoils=displacement_eV is not None)
     return ImplantProblem(beam=beam, target=target, models=models,
                           statistics=Statistics(n_ions=int(n_ions), seed=int(seed)))

@@ -1950,3 +1950,124 @@ either (MARLOWE, Crystal-TRIM, IMSIL and MDRANGE are not openly distributed). So
 is invented. It can be done when the owner supplies one of the two papers (through the university library):
 the model is a weighted sum of two Pearson IV curves, a few hours of work plus acceptance against the
 paper's own example profiles.
+
+### A12 to A14, laptop run (19 Nov 2026)
+
+Update 9 on the owner's laptop (WSL2, committed as 53dd2a9 on arch/v1): fast tests 1449 passed, 12 skipped,
+6 xfailed; the RustBCA command-line program and g4implant built without sudo. Every acceptance number of A12.8,
+A13.7 and A14.7 was reproduced to the printed digits (A12: 26 passed; A13: 27 passed, 4 recorded FAILs; A14: 20
+passed, 3 recorded FAILs). Only R74 differs, as expected with more threads: peak memory 154 MB (limit 1.5 GB), 69 s.
+The demo's table is identical to A14.7's.
+
+### Master becomes the v1 line (19 Nov 2026)
+
+Owner's instruction: "lets do these two: the 23 legacy scripts; replacing master with arch/v1". The original list
+of 23 was lost when the lead's notes were compacted, so every runnable entry point of the old master was checked
+instead. v1 modified 5 files that existed on master (pytest.ini, simws/adapters/__init__.py, simws/hub/citations.py,
+simws/hub/model_form.py, tools/nightly.sh: all additions) and deleted none, so the standalone scripts that do not
+import simws (pipeline/legacy, sige_hbt_study, 03_tcad_devices, benchmarks) cannot change. The old workflow
+(`rule all`, 14 targets) was run with the old master code and with the v1 code and compared number by number
+(tools/legacy_compare.py, relative 1e-9, timestamps skipped): 11 targets on the build machine (28 output files) and
+3 on the owner's laptop (geant4_track, si_film; qe_si_scf rerun with the real pseudopotential folder, which git
+does not carry): every output identical. Then `simws_master_switch.sh` tagged the old master as
+legacy-master-2026-11-19 (a79994f) and fast-forwarded master to arch/v1 (53dd2a9) in ~/sim_workspace; the quick
+check passed (49 tests). Not merged yet: the ws/* branches (ws0 to ws4 one commit each, ws6 five).
+
+### A15, continued (19 Nov 2026, lead): channeling from the two papers the owner supplied
+
+The owner supplied both papers named in A15 (Sabanci University library copies) with "there find them here". The
+PDFs are not put in the repository (copyright); their SHA-256 and the extracted numbers are, in
+`simws/data/channeling/tasch1989_boron.json` and `suzuki2000_arsenic.json`, each with its page, table or figure and
+the method by which a figure was read.
+
+0. **What the lead had already seen.** Both papers in full. Tasch: Table I (B+) and Table II (BF2+) typed; Fig. 5
+   (fraction of the dose in the main peak, D1/DT, against dose) digitised by the lead (21 points). Suzuki: Fig. 4(a)
+   (Rpm, dRp1, dRp2, L, alpha against energy) and 4(b) (channel dose against dose) digitised by the lead; the
+   equations (3)-(9). No profile had been computed from either model when items 0 to 7 were committed.
+1. **What the two models are.** Tasch (boron, B+): N(x) = D1 f1(x) + D2 f2(x), f1 the main ("non-channeled")
+   Pearson density and f2 the channeling Pearson density, both depending on energy only (Table I), D1 / DT on
+   energy and dose (Fig. 5); fitted by the authors to SIMS profiles of 68 implants into bare (100) silicon at 7 deg
+   tilt and 30 deg rotation. Suzuki (arsenic): N(x) = (Phi - Phi_chan) n_a(x) + Phi_chan n_c(x), n_a a joined half
+   Gaussian (peak Rpm, front dRp1, back dRp2), n_c the same with an exponential-type tail exp(-((x - Rpm)/L)^alpha)
+   joined continuously at Rpm + dRp2 (factor kappa, eq. 7); each density normalised on [0, inf); parameters from
+   crystal-TRIM Monte Carlo that the authors tuned to SIMS (so a fit to simulation, not to measurement), 7 deg tilt,
+   22 deg rotation, no cover oxide. Eq. (5) as printed lacks the squares; the joined half Gaussian it cites
+   (Gibbons and Mylroie 1973) is h_m exp(-(x - Rpm)^2 / (2 dRp^2)), which is used.
+2. **Interpolation and the region each model covers (fixed now).** Boron: Table I parameters linearly in energy;
+   D1/DT linearly in energy between the 15, 25, 35 and 50 keV curves and linearly in log10(dose) along each curve.
+   Covered: 15 to 50 keV and 2e13 to 2e15 cm^-2 (where all four curves have points). The 80 keV column of Table I
+   and the 80 keV and 1e16 points of Fig. 5 are kept in the data file but not used. Arsenic: Fig. 4(a) linearly in
+   energy between 40, 80, 120, 160 and 200 keV; Phi_chan / Phi linearly in energy between the 40, 120 and 200 keV
+   curves of Fig. 4(b) and linearly in log10(dose). Covered: 40 to 200 keV, 1e11 to 1e16 cm^-2.
+   Both: one layer of crystalline silicon, beam tilt 7 deg and rotation 30 deg (boron) or 22 deg (arsenic), each
+   within 0.5 deg, dose given. Anything else is refused: the papers say the channeled part depends strongly on the
+   angles and no rule for other angles is given.
+3. **The Pearson density.** From (Rp, dRp, gamma, beta) through the Pearson differential equation
+   d ln f / dx = (x - a) / (b0 + b1 x + b2 x^2), x measured from Rp, with A = 10 beta - 12 gamma^2 - 18,
+   a = b1 = -dRp gamma (beta + 3) / A, b0 = -dRp^2 (4 beta - 3 gamma^2) / A, b2 = -(2 beta - 3 gamma^2 - 6) / A
+   (the standard Pearson system; Tasch's eq. 4 with the signs that give a density); integrated numerically on the
+   region where the denominator keeps its sign around the mode, so every Pearson type the four moments give is
+   covered (Table I has beta = 2.80 with gamma = 0, a bounded type II). Truncated to x >= 0 and normalised there.
+4. **Description.** `Target.structure` (written `Layer.structure` at first; corrected before any code ran: the field
+   is on the target) becomes Literal["amorphous", "crystalline_si_100"], default unchanged.
+   `Beam` gains `rotation_deg: Optional[float] = None` (0 to 360), left out of the serialised description when
+   None, so no existing id changes. The BCA engines keep refusing anything but "amorphous".
+5. **Engine `channeling`** (`simws/engines/channeling_engine.py`, family implant, code "published_fits", in
+   process, no environment beyond numpy): evaluates the model on the problem's depth bins (bin-averaged density
+   per ion, 1/um). `ImplantResult` gains `profile_um` (bin centres) and `profile_per_um`, and
+   `channeled_fraction` (D2 / DT for boron, Phi_chan / Phi for arsenic); depth_um and lateral_um stay empty (no
+   ions are followed; no lateral information). The problem's potential, stopping and statistics are not used: a
+   result carries `"implant:published_fit: <cite>; <conditions>; the models and statistics of the description are
+   not used (A15)"`. Model uncertainty from the reading of the figures: the profile and quantities are also
+   evaluated with the figure values moved by their stated reading uncertainty (D1/DT -/+ 0.002; Fig. 4(a) lengths
+   -/+ 1 nm, alpha -/+ 0.01, channel dose -/+ 5 %), each group in the direction that widens the result; half the
+   spread is the reported sigma. The paper's own fit error to SIMS is not included (Tasch quotes 15 % for the SIMS
+   concentrations), and a result says so in `budget:digitisation_only`.
+   Adapter `implant.channeling` (env tcad): `implant.profile` (1/m, on the depth axis), `implant.concentration`
+   (1/m^3), `implant.Rp` and `implant.dRp` (mean and standard deviation of the whole profile, m),
+   `implant.channeled_fraction` (dimensionless). Citation keys tasch1989, suzuki2000.
+6. **Acceptance (tolerances fixed here, before any profile has been computed).**
+   R80 (the Pearson code): for every column of Table I and Table II, both components, the untruncated density's
+   numerical mean, standard deviation, skewness and kurtosis reproduce the table: Rp within 0.5 %, dRp within 1 %,
+   gamma within 0.02, beta within 0.05.
+   R81 (normalisation): the integral of N over the depth equals the dose within 1e-4 relative, boron at (15, 2e13),
+   (35, 5e14), (50, 2e15) and arsenic at (40, 1e11), (120, 1e13), (200, 1e16) (keV, cm^-2), with a target deep
+   enough to hold the profile (the engine refuses one that cuts off more than 1e-4 of it).
+   R82 (the figures, read again independently): the checker digitises Tasch Fig. 5 and Suzuki Fig. 4 from the PDFs
+   by a method of its own; D1/DT within 0.005 at every point used; Fig. 4(a) lengths within 2 nm or 3 % (the
+   larger), alpha within 0.02; Fig. 4(b) within 10 %. Typed table values within 0 (copied exactly).
+   R83 (Suzuki's joins): n_c continuous at Rpm + dRp2 within 1e-9 relative; n_a and n_c have their maximum at Rpm
+   (within one depth bin).
+   R84 (what the papers state, as checks of the implementation): boron, the channeled fraction falls with dose at
+   15, 25, 35 and 50 keV; arsenic, Phi_chan / Phi falls with dose above 1e13 cm^-2 and Phi_chan(1e16) /
+   Phi_chan(1e14) < 1.5 at 40, 120 and 200 keV (saturation); both, the depth at which the profile falls to 1e-3 of
+   its peak is larger than that of the main component alone, for every energy and dose of R81.
+   R85 (reported, no gate): boron, the main component's Rp (Table I R1) against RustBCA's "empirical" amorphous Rp
+   at 15, 25, 35 and 50 keV; arsenic, Rpm against RustBCA's Lindhard-Scharff amorphous peak position at 40, 80,
+   120, 160 and 200 keV. These compare a crystal's non-channeled peak with an amorphous calculation; they are
+   context, not verification.
+   R86 (no id changes): `implant_si("P", 50)` and `implant_si("B", 100)` keep their ids.
+   R87 (refusals, reason prefixes): wrong tilt or rotation ("angles:"), an ion other than B or As ("ion:"), energy
+   or dose outside item 2 ("energy:", "dose:"), no dose ("dose:"), more than one layer or a layer that is not
+   crystalline silicon ("structures:"); the BCA engines refuse "crystalline_si_100" ("structures:").
+7. **Trust.** There is no second channeling engine: every result is "unverified" by rule. The boron model is a fit
+   to measured SIMS profiles at one pair of angles; the arsenic model is a fit to tuned Monte Carlo. Phosphorus
+   needs a third source (Suzuki et al., Solid-State Electron. 42, 1671 (1999), ref. [1] of the arsenic paper).
+8. **After the checker's report (19 Nov).** 121 tests written from A15 and the two papers (tests/v1/test_channeling.py).
+   **Two implementation defects, found by the checker and fixed** (the code now does what items 1 and 2 say; no
+   tolerance and no rule was changed): (a) the arsenic components were normalised over the target instead of over
+   [0, inf), so a profile depended on the target's thickness and a too-thin target was not refused (200 keV,
+   1e11: 1.2e-2 of the profile lies beyond 0.5 um); (b) the arsenic channel share was interpolated as
+   log10(Phi_chan) against log10(dose) (straight lines on the log-log figure) instead of Phi_chan / Phi linearly in
+   log10(dose) as item 2 says; between the digitised doses the two differ by up to 41 %. The thin-target refusal is
+   now also returned by `unsupported()`, so the planner sees it (reason prefix "structures:").
+   **Results (all pass):** R80 the Pearson code reproduces all 24 columns of Tables I and II to 4 decimals (types I,
+   II, IV and VII among them); R81 normalisation within 1.4e-5; R82 the checker's own digitisation of the figures:
+   Tasch Fig. 5 within 0.0014 (limit 0.005), Suzuki Fig. 4(a) lengths within 0.38 nm (limit 2 nm), alpha within
+   0.006 (limit 0.02), Fig. 4(b) within 5.4 % (limit 10 %), Tables I and II identical to the PDF text; R83; R84 (the
+   arsenic tail at 200 keV and 1e16 is deeper than the main part by only 0.5 nm: at that dose 0.04 % of the dose
+   is channeled); R86; R87 (23 refusal cases).
+   **R85 (reported):** boron, RustBCA "empirical" amorphous Rp against Tasch's main-peak R1: -6.4 % (15 keV),
+   -0.6 % (25), +2.7 % (35), +5.9 % (50); arsenic, RustBCA Lindhard-Scharff amorphous peak position against
+   Suzuki's Rpm: +25 % to +40 % (the means, 32 to 127 nm, are closer). So for boron the amorphous BCA (with the A12
+   factor) and the SIMS fit's main peak agree to 6 %; for arsenic RustBCA's peak is deeper than the fit's.

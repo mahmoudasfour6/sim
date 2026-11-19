@@ -99,7 +99,20 @@ What to keep in mind when reading an implant result:
   come out about 35 % too deep**: this failed its acceptance check and is recorded as a FAIL (contract A7.9);
   boron results carry the flag `implant:known_failure:`. Arsenic has not been checked against anything. Boron
   and arsenic results are flagged `extrapolated:` and `in_range` is False: use them for trends, not for numbers.
-- No beams above 25 keV per nucleon, and no channeling model (A15: no openly published parameters were found).
+- No beams above 25 keV per nucleon in the BCA engines.
+
+### Channeling in crystalline silicon (contract A15)
+
+```python
+p = implant_si("B", 35, tilt_deg=7, rotation_deg=30, dose_cm2=1e14, crystal=True, thickness_um=1.5)
+r = hub.submit("implant.channeling", params={"problem": p})
+r.q("implant.concentration"), r.q("implant.channeled_fraction")
+```
+
+- Boron from Tasch et al. 1989 (two Pearson curves fitted to SIMS): 15-50 keV, 2e13-2e15 cm^-2, tilt 7, rotation 30.
+- Arsenic from Suzuki et al. 2000 (half Gaussians with a channeling tail, fitted to tuned Monte Carlo): 40-200 keV,
+  1e11-1e16 cm^-2, tilt 7, rotation 22. Phosphorus is not covered yet.
+- Other angles are refused. Error bars come only from reading the papers' figures. `python tools/v1_channeling_demo.py`.
 
 ### Measured stopping, a second engine, damage (contracts A12, A13, A14)
 

@@ -209,9 +209,11 @@ def test_plan_implant_problem():
     assert pl.problem_id == p.problem_id()
     # amended by the lead (A13.3): g4implant is the checker; its tested ranges are empty until A13.6
     assert pl.primary == "rustbca" and pl.checkers == ["g4implant"]
-    assert set(pl.refused) == {"devsim", "charon", "g4see", "ngspice", "devsim_eb"}   # amended by the lead (A8.3, A9.3, A11.3)
+    # amended by the lead (A15.5): the channeling engine refuses an amorphous target
+    assert set(pl.refused) == {"devsim", "charon", "g4see", "ngspice", "devsim_eb", "channeling"}   # amended by the lead (A8.3, A9.3, A11.3)
     for n in ("devsim", "charon", "g4see", "ngspice", "devsim_eb"):
         assert len(pl.refused[n]) == 1 and pl.refused[n][0].startswith("problem kind:")
+    assert any(r.startswith("structures:") for r in pl.refused["channeling"])
     assert "rustbca" not in pl.warnings
     assert "rustbca" in pl.summary()
 

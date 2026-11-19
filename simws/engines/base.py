@@ -129,6 +129,11 @@ class ImplantResult(BaseModel):
     vacancy_bin_um: float = 0.0                    # A14.3: with recoils, the depth bin of the vacancy histograms
     vacancy_batches: List[List[float]] = []        # one histogram (vacancies per depth bin) per batch
     vacancy_batch_ions: List[int] = []             # ions launched in each batch
+    profile_um: List[float] = []                   # A15.5: an analytic engine's depth bin centres ...
+    profile_per_um: List[float] = []               # ... and its density per launched ion (1/um), bin averaged
+    profile_sigma_per_um: List[float] = []         # its model (digitisation) uncertainty
+    channeled_fraction: Optional[float] = None     # A15.5: share of the dose in the channeling component
+    channeled_fraction_sigma: Optional[float] = None
     flags: List[str] = []
     diagnostics: Dict[str, Any] = {}               # JSON-serialisable only
 

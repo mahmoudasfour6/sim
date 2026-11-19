@@ -1,0 +1,206 @@
+{
+ "source": {
+  "cite": "A. F. Tasch, H. Shin, C. Park, J. Alvis and S. Novak, J. Electrochem. Soc. 136(3), 810-814 (1989), doi 10.1149/1.2096748",
+  "pdf_sha256": "984a1b71fda168034aaffe319ee32c617d03d14ae8c1d845564cf92bacb2fe65",
+  "conditions": "B+ into bare n-type (100) silicon, 7 deg tilt, 30 deg rotation, room temperature; profiles measured by SIMS (68 implants); Pearson parameters fitted by the authors"
+ },
+ "model": "N(x) = D1 f1(x) + D2 f2(x); f1, f2 Pearson densities normalised on [0, inf); D1 + D2 = DT (eq. 5, 6)",
+ "table_I": {
+  "note": "Table I, page 813, typed values. R and dRp in angstrom; S = skewness gamma, K = kurtosis beta",
+  "energy_keV": [
+   15,
+   25,
+   35,
+   50,
+   80
+  ],
+  "R1_A": [
+   650,
+   980,
+   1290,
+   1730,
+   2560
+  ],
+  "dRp1_A": [
+   300,
+   450,
+   530,
+   610,
+   750
+  ],
+  "S1": [
+   0.55,
+   -0.04,
+   -0.3,
+   -0.4,
+   -0.45
+  ],
+  "K1": [
+   3.5,
+   3.5,
+   3.5,
+   3.5,
+   3.5
+  ],
+  "R2_A": [
+   1150,
+   1700,
+   2200,
+   2900,
+   4100
+  ],
+  "dRp2_A": [
+   580,
+   670,
+   750,
+   780,
+   870
+  ],
+  "S2": [
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "K2": [
+   2.8,
+   2.9,
+   3.02,
+   3.1,
+   3.14
+  ]
+ },
+ "table_II_BF2": {
+  "note": "Table II, page 814 (BF2+, boron profile); used only to test the Pearson code on skewed and peaked shapes (BF2 is a molecule the description cannot hold)",
+  "energy_keV": [
+   15,
+   25,
+   35,
+   45,
+   55,
+   65,
+   80
+  ],
+  "R1_A": [
+   200,
+   280,
+   345,
+   432,
+   488,
+   562,
+   654
+  ],
+  "dRp1_A": [
+   90,
+   125,
+   158,
+   185,
+   222,
+   254,
+   311
+  ],
+  "S1": [
+   0.7,
+   0.7,
+   0.7,
+   0.7,
+   0,
+   0,
+   -0.2
+  ],
+  "K1": [
+   3.5,
+   3.5,
+   3.5,
+   3.5,
+   3.5,
+   3.5,
+   3.5
+  ],
+  "R2_A": [
+   330,
+   460,
+   600,
+   680,
+   760,
+   850,
+   1040
+  ],
+  "dRp2_A": [
+   260,
+   340,
+   410,
+   460,
+   550,
+   590,
+   650
+  ],
+  "S2": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "K2": [
+   6.8,
+   6.3,
+   5.4,
+   4.2,
+   3.8,
+   3.5,
+   3.3
+  ]
+ },
+ "fig5_D1_over_DT": {
+  "note": "Fig. 5, page 812, digitised by the lead on 19 Nov 2026: page rendered at 450 dpi; axis frame found from the pixels (D1/DT 1.0 at row 181, 0.8 at row 1093; 1e13 at column 276.5, 1e17 at 1470.5); marker centroids from dark-pixel blobs in a 23-pixel column window at each dose. Estimated reading uncertainty 0.002. At 1e16 the 25, 35 and 50 keV markers merge into one blob spanning 0.983 to 0.992; the three values are read from the blob's extent (uncertainty 0.003).",
+  "dose_cm2": [
+   20000000000000.0,
+   100000000000000.0,
+   500000000000000.0,
+   2000000000000000.0,
+   1e+16
+  ],
+  "curves": {
+   "15": [
+    0.8295,
+    0.854,
+    0.9002,
+    0.9516,
+    null
+   ],
+   "25": [
+    0.8618,
+    0.8918,
+    0.925,
+    0.9675,
+    0.984
+   ],
+   "35": [
+    0.908,
+    0.9291,
+    0.956,
+    0.9755,
+    0.988
+   ],
+   "50": [
+    0.9341,
+    0.9408,
+    0.9639,
+    0.984,
+    0.991
+   ],
+   "80": [
+    null,
+    0.9586,
+    null,
+    0.9904,
+    null
+   ]
+  },
+  "assignment": "curves assigned by order: the paper states the main peak is more dominant at higher energy at low dose; 15 keV open squares (lowest), 25 keV diamonds, 35 keV filled squares, 50 keV diamonds (highest), 80 keV open circles (two points)"
+ }
+}
