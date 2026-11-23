@@ -11,7 +11,8 @@ ENGINES: Dict[str, str] = {"devsim": "simws.engines.devsim_engine", "charon": "s
                            "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
                            "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine",
                            "g4implant": "simws.engines.g4implant_engine",
-                           "channeling": "simws.engines.channeling_engine"}
+                           "channeling": "simws.engines.channeling_engine",
+                           "devsim_anneal": "simws.engines.devsim_anneal_engine", "fipy": "simws.engines.fipy_engine"}
 
 
 def names() -> List[str]:

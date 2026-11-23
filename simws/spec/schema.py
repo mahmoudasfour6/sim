@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 SPEC_VERSION = "1.0"
 
@@ -116,6 +116,37 @@ class DopingTerm(_M):
     label: str = ""
 
 
+class ProfileTerm(_M):
+    """A tabulated concentration of one dopant type along one axis (contract A16.5), the same along the other axis:
+    linear between points, zero outside [first, last]. Terms add to the boxes."""
+    species: Literal["donor", "acceptor"]
+    axis: Literal["x", "y"] = "x"
+    position_um: List[float]
+    concentration_cm3: List[float]
+    label: str = ""
+
+    @model_validator(mode="after")
+    def _points(self):
+        x, c = self.position_um, self.concentration_cm3
+        if not 2 <= len(x) <= 20000:
+            raise ValueError(f"profile term: 2 to 20000 points, got {len(x)}")
+        if len(c) != len(x):
+            raise ValueError("profile term: position_um and concentration_cm3 need the same length")
+        if not (np.all(np.isfinite(x)) and np.all(np.isfinite(c))):
+            raise ValueError("profile term: values must be finite")
+        if any(b <= a for a, b in zip(x, x[1:])):
+            raise ValueError("profile term: position_um must be strictly increasing")
+        if any(v < 0 for v in c):
+            raise ValueError("profile term: concentrations must be >= 0")
+        return self
+
+    def at(self, coord) -> np.ndarray:
+        coord = np.asarray(coord, dtype=float)
+        x, c = np.asarray(self.position_um), np.asarray(self.concentration_cm3)
+        out = np.interp(coord, x, c, left=0.0, right=0.0)
+        return np.where((coord < x[0]) | (coord > x[-1]), 0.0, out)
+
+
 class GradeTerm(_M):
     """Linear alloy grading along one axis: the mole fraction goes from x_start at `start` to x_stop at `stop`
     (micrometres) and is zero outside [start, stop] (both ends included)."""
@@ -166,6 +197,14 @@ class DeviceSpec(_M):
     grading: List[GradeTerm] = Field(default_factory=list)
     mesh: MeshHints
     description: str = ""
+    profiles: List[ProfileTerm] = Field(default_factory=list)     # A16.5: tabulated doping (e.g. after an anneal)
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler):
+        d = handler(self)
+        if isinstance(d, dict) and not d.get("profiles"):          # A16.5: no id changes without profiles
+            d.pop("profiles", None)
+        return d
 
     @model_validator(mode="after")
     def _consistent(self):
@@ -192,6 +231,9 @@ class DeviceSpec(_M):
         for g in self.grading:
             if g.axis == "y" and self.dimension == 1:
                 raise ValueError("grading: a 1D device grades along x")
+        for t in self.profiles:
+            if t.axis == "y" and self.dimension == 1:
+                raise ValueError("profiles: a 1D device has profiles along x only")
         if (self.mesh.y_lines is None) != (self.dimension == 1):
             raise ValueError("mesh: y_lines are required for 2D and forbidden for 1D")
         return self
@@ -228,6 +270,12 @@ class DeviceSpec(_M):
                 nd = nd + t.concentration_cm3 * m
             else:
                 na = na + t.concentration_cm3 * m
+        for t in self.profiles:
+            v = t.at(x if t.axis == "x" else np.asarray(y, dtype=float))
+            if t.species == "donor":
+                nd = nd + v
+            else:
+                na = na + v
         return nd, na
 
     def mole_fraction_at(self, x, y=None, element: str = "Ge") -> np.ndarray:
@@ -336,7 +384,63 @@ class SmallSignal(_M):
         return self
 
 
-Analysis = Union[Equilibrium, DCSweep, SmallSignal]
+class StrikeTransient(_M):
+    """A particle strike as a generation pulse at a fixed bias (contract A17.1), 1D devices: `pairs_cm2` pairs per cm^2
+    of device area generated uniformly over depth_um = (start, stop), in time a Gaussian (t_peak_s, sigma_s)
+    truncated to t_peak +- 4 sigma and renormalised to unit area. The bias entries are ramped first, in the order
+    given; every other contact stays at 0 V. Result: the current into every contact at every time point."""
+    kind: Literal["strike"] = "strike"
+    bias: List[Bias] = Field(default_factory=list)
+    pairs_cm2: float = Field(gt=0)
+    depth_um: Tuple[float, float]
+    t_peak_s: float = Field(gt=0)
+    sigma_s: float = Field(gt=0)
+    t_stop_s: float = Field(gt=0)
+    steps_per_sigma: int = Field(default=10, ge=2, le=1000)
+    points_per_decade: int = Field(default=20, ge=2, le=1000)
+
+    @model_validator(mode="after")
+    def _ok(self):
+        names = [b.contact for b in self.bias]
+        if len(set(names)) != len(names):
+            raise ValueError("strike: a contact may appear once in bias")
+        if not self.depth_um[0] < self.depth_um[1]:
+            raise ValueError("strike: depth_um must have start < stop")
+        if self.t_peak_s < 4.0 * self.sigma_s * (1 - 1e-12):
+            raise ValueError("strike: t_peak_s must be at least 4 sigma_s (the pulse starts at t_peak - 4 sigma)")
+        if not self.t_stop_s > self.t_peak_s + 4.0 * self.sigma_s:
+            raise ValueError("strike: t_stop_s must be after t_peak_s + 4 sigma_s")
+        return self
+
+    def window(self) -> Tuple[float, float]:
+        return self.t_peak_s - 4.0 * self.sigma_s, self.t_peak_s + 4.0 * self.sigma_s
+
+    def time_points_s(self) -> np.ndarray:
+        """A17.1: 10 points geometric from 1e-3 (t_peak - 4 sigma) to t_peak - 4 sigma (none when that is 0), steps
+        of sigma / steps_per_sigma to t_peak + 4 sigma, then points_per_decade geometric to t_stop_s."""
+        a, b = self.window()
+        pts: List[float] = []
+        if a > 0:
+            pts += list(np.geomspace(1e-3 * a, a, 10))
+        n = int(round((b - a) / (self.sigma_s / self.steps_per_sigma)))
+        pts += list(a + (b - a) * np.arange(1, n + 1) / n)
+        decades = np.log10(self.t_stop_s / b)
+        m = max(1, int(np.ceil(decades * self.points_per_decade - 1e-9)))
+        pts += list(b * (self.t_stop_s / b) ** (np.arange(1, m + 1) / m))
+        out = np.asarray(pts, float)
+        return out[np.concatenate(([True], np.diff(out) > 0))]
+
+    def g(self, t) -> np.ndarray:
+        """The truncated, renormalised unit-area Gaussian (1/s) at times t."""
+        from math import erf, sqrt
+        t = np.asarray(t, float)
+        a, b = self.window()
+        norm = erf(4.0 / sqrt(2.0))
+        out = np.exp(-0.5 * ((t - self.t_peak_s) / self.sigma_s) ** 2) / (self.sigma_s * np.sqrt(2 * np.pi) * norm)
+        return np.where((t >= a) & (t <= b), out, 0.0)
+
+
+Analysis = Union[Equilibrium, DCSweep, SmallSignal, StrikeTransient]
 
 
 class Numerics(_M):
@@ -368,6 +472,13 @@ class Problem(_M):
             for n in [b.contact for b in a.bias] + list(a.ports):
                 if n not in names:
                     raise ValueError(f"analysis: unknown contact '{n}'")
+        if isinstance(a, StrikeTransient):
+            for n in [b.contact for b in a.bias]:
+                if n not in names:
+                    raise ValueError(f"analysis: unknown contact '{n}'")
+            ext = self.device.extent().x
+            if a.depth_um[0] < ext[0] - 1e-12 or a.depth_um[1] > ext[1] + 1e-12:
+                raise ValueError(f"strike: depth_um {a.depth_um} is not inside the device {ext}")
         return self
 
     def problem_id(self) -> str:

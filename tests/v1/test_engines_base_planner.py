@@ -147,9 +147,11 @@ def test_registry():
                                "rustbca": "simws.engines.rustbca_engine", "g4see": "simws.engines.g4see_engine",
                                "ngspice": "simws.engines.ngspice_engine", "devsim_eb": "simws.engines.devsim_eb_engine",
                                "g4implant": "simws.engines.g4implant_engine",
-                               "channeling": "simws.engines.channeling_engine"}   # amended by the lead (A13.3, A15.5)
+                               "channeling": "simws.engines.channeling_engine",
+                               "devsim_anneal": "simws.engines.devsim_anneal_engine",
+                               "fipy": "simws.engines.fipy_engine"}   # amended by the lead (A13.3, A15.5, A16.3)
     # amended by the lead (A8.3, A9.3, A11.3)
-    assert engines.names() == ["channeling", "charon", "devsim", "devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5)
+    assert engines.names() == ["channeling", "charon", "devsim", "devsim_anneal", "devsim_eb", "fipy", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5, A16.3)
     for n in DEVICE_ENGINES:
         mod = engines.module(n)
         assert isinstance(engines.capability(n), Capability)
@@ -191,7 +193,7 @@ def test_devsim_capability_exact():
     assert c.incomplete_ionization == ["off", "altermatt", "constant_energy"]
     assert c.impact_ionization == ["off", "van_overstraeten"]
     # contract A6.4: "small_signal" added (A6 does not fix the position in the list)
-    assert sorted(c.analyses) == ["dc_sweep", "equilibrium", "small_signal"] and len(set(c.analyses)) == 3
+    assert sorted(c.analyses) == ["dc_sweep", "equilibrium", "small_signal", "strike"] and len(set(c.analyses)) == 4   # amended by the lead (A17.3)
     assert tuple(c.tested_temperature_K) == (250.0, 400.0)
     assert c.mesh_study is True                                     # contract A4.2
 
@@ -252,7 +254,7 @@ def test_plan_both_engines_prefer_and_registry_order(charon_problem):
     pl = plan(p)
     # amended by the lead (A7.3, A8.3, A11.3): engines of the other problem families are refused, one reason each;
     # devsim_eb refuses the Charon problem (Fermi-Dirac statistics)
-    assert sorted(pl.refused) == ["channeling", "devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5)
+    assert sorted(pl.refused) == ["channeling", "devsim_anneal", "devsim_eb", "fipy", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5, A16.3)
     assert all(len(r) == 1 and r[0].startswith("problem kind:") for e, r in pl.refused.items() if e != "devsim_eb")
     assert pl.primary == "devsim" and pl.checkers == ["charon"]
     assert pl.warnings == {}                            # 300 K is inside both tested ranges
@@ -266,7 +268,7 @@ def test_plan_warnings_only_non_empty(charon_problem):
     from simws.engines.planner import plan
     pl = plan(charon_problem(T=77.0))                   # inside Charon's [77, 300], outside DEVSIM's [250, 400]
     # amended by the lead (A7.3, A8.3, A11.3): other families refuse with one reason; devsim_eb refuses Fermi-Dirac
-    assert sorted(pl.refused) == ["channeling", "devsim_eb", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5)
+    assert sorted(pl.refused) == ["channeling", "devsim_anneal", "devsim_eb", "fipy", "g4implant", "g4see", "ngspice", "rustbca"]   # amended by the lead (A13.3, A15.5, A16.3)
     assert all(len(r) == 1 and r[0].startswith("problem kind:") for e, r in pl.refused.items() if e != "devsim_eb")
     assert list(pl.warnings) == ["devsim"]
 

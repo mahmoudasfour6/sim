@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from simws.engines.base import Capability, EngineNotAvailable, EngineResult, Unsupported
-from simws.spec.schema import DCSweep, DopingTerm, GradeTerm, Problem, SmallSignal
+from simws.spec.schema import DCSweep, DopingTerm, GradeTerm, Problem, SmallSignal, StrikeTransient
 
 UM = 1e-4                  # micrometre -> cm
 DEVICE, MESH = "d", "m"
@@ -26,7 +26,7 @@ CAPABILITY = Capability(
     contact_kinds=["ohmic"], statistics=["boltzmann", "fermi_dirac"], mobility=["constant", "masetti", "klaassen"],
     velocity_saturation=[False, True], srh=["off", "constant", "scharfetter"], auger=[False, True],
     band_gap_narrowing=["off", "slotboom"], incomplete_ionization=["off", "altermatt", "constant_energy"],
-    impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep", "small_signal"],
+    impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep", "small_signal", "strike"],
     tested_temperature_K=(250.0, 400.0), mesh_study=True,
     notes="2D contacts only on y_min / y_max (pad regions); one grading term; one region starting at the origin")
 
@@ -47,6 +47,8 @@ def unsupported(problem: Problem) -> List[str]:
         if any(iv[0] != 0 for iv in ivs):
             out.append("regions: the region box must start at 0")
             break
+    if problem.analysis.kind == "strike" and dev.dimension != 1:
+        out.append("strike: the strike analysis is for 1D devices only (A17.1)")
     if len(dev.grading) > 1:
         out.append(f"grading: {len(dev.grading)} grading terms; the DEVSIM translator takes one")
     if dev.regions and not any(s.startswith("regions:") for s in out):
@@ -92,9 +94,32 @@ def doping_expressions(problem: Problem) -> Tuple[str, str]:
     """(net, total) node expressions in cm^-3, with x, y in cm."""
     don = [_term_expr(t) for t in problem.device.doping if t.species == "donor"]
     acc = [_term_expr(t) for t in problem.device.doping if t.species == "acceptor"]
+    don += [PROFILE_SOLUTION["donor"]] if any(t.species == "donor" for t in problem.device.profiles) else []
+    acc += [PROFILE_SOLUTION["acceptor"]] if any(t.species == "acceptor" for t in problem.device.profiles) else []
     nd = "(" + " + ".join(don) + ")" if don else "(0)"
     na = "(" + " + ".join(acc) + ")" if acc else "(0)"
     return f"{nd} - {na}", f"{nd} + {na}"
+
+
+PROFILE_SOLUTION = {"donor": "ProfileDonors", "acceptor": "ProfileAcceptors"}     # A16.5, cm^-3
+
+
+def set_profiles(problem: Problem, region: str) -> None:
+    """A16.5: the device's ProfileTerms evaluated at every node into node solutions (one per species), which the
+    doping expressions add to the boxes."""
+    if not problem.device.profiles:
+        return
+    from devsim import get_node_model_values, node_solution, set_node_values
+    x = np.asarray(get_node_model_values(device=DEVICE, region=region, name="x"), float) / UM
+    y = (np.asarray(get_node_model_values(device=DEVICE, region=region, name="y"), float) / UM
+         if problem.device.dimension == 2 else None)
+    for species, name in PROFILE_SOLUTION.items():
+        terms = [t for t in problem.device.profiles if t.species == species]
+        if not terms:
+            continue
+        v = sum(t.at(x if t.axis == "x" else y) for t in terms)
+        node_solution(device=DEVICE, region=region, name=name)
+        set_node_values(device=DEVICE, region=region, name=name, values=[float(a) for a in v])
 
 
 def grade_expression(g: GradeTerm) -> str:
@@ -245,6 +270,7 @@ def _build(problem: Problem) -> _State:
     region = dev.regions[0]
     reset_devsim()
     (_mesh_1d if dev.dimension == 1 else _mesh_2d)(problem, region)
+    set_profiles(problem, region.name)
     net, tot = doping_expressions(problem)
     phys = physics_from(problem)
     num = problem.numerics
@@ -253,9 +279,10 @@ def _build(problem: Problem) -> _State:
         from devsim import circuit_element
         for c in dev.contacts:
             circuit_element(name=_source(c.name), n1=_node(c.name), n2="0", value=0.0)
+    extra = _strike_footprint(problem, region.name) if isinstance(problem.analysis, StrikeTransient) else None
     try:
         used = setup_region(DEVICE, region.name, load(region.material), net, tot, phys,
-                            {c.name: circuit for c in dev.contacts})
+                            {c.name: circuit for c in dev.contacts}, extra_generation=extra)
     except RuntimeError as e:
         if _no_convergence(e):
             raise NotConverged(f"equilibrium solve at 0 V: {e}") from e
@@ -272,6 +299,30 @@ def _build(problem: Problem) -> _State:
         flags.append("cryo_unvalidated: below 250 K checked against closed forms and Charon only, "
                      "not against measured devices")
     return _State(problem, used, region.name, opts, flags)
+
+
+STRIKE_RATE = "strike_rate"            # pairs/cm^3/s inside the segment, set at every time step (A17.2)
+STRIKE_FOOTPRINT = "StrikeFootprint"
+
+
+def _strike_footprint(problem: Problem, region: str) -> str:
+    """A17.2: 1 inside the segment, 0 outside, 1/2 at a node exactly on an end, scaled so that its node-volume
+    integral equals the segment length; the rate parameter starts at 0. Returns the generation expression."""
+    from devsim import get_node_model_values, node_solution, set_node_values, set_parameter
+    an = problem.analysis
+    x = np.asarray(get_node_model_values(device=DEVICE, region=region, name="x"), float) / UM
+    vol = np.asarray(get_node_model_values(device=DEVICE, region=region, name="NodeVolume"), float)
+    a, b = an.depth_um
+    on_end = np.isclose(x, a, rtol=0, atol=1e-9) | np.isclose(x, b, rtol=0, atol=1e-9)
+    f = np.where(on_end, 0.5, np.where((x > a) & (x < b), 1.0, 0.0))
+    total = float((f * vol).sum())
+    if total <= 0:
+        raise Unsupported("devsim", [f"strike: no mesh node in the segment {an.depth_um} um"])
+    f *= (b - a) * UM / total
+    node_solution(device=DEVICE, region=region, name=STRIKE_FOOTPRINT)
+    set_node_values(device=DEVICE, region=region, name=STRIKE_FOOTPRINT, values=[float(v) for v in f])
+    set_parameter(device=DEVICE, region=region, name=STRIKE_RATE, value=0.0)
+    return f"{STRIKE_RATE}*{STRIKE_FOOTPRINT}"
 
 
 def build(problem: Problem) -> dict:
@@ -293,6 +344,8 @@ def run(problem: Problem, workdir: Optional[Path] = None, _post_build=None) -> E
     diag = {"used": _json(st.used), "solver_options": _json(st.opts), "n_contacts": len(contacts)}
     if isinstance(an, SmallSignal):
         return _small_signal(problem, st, contacts, unit, diag)
+    if isinstance(an, StrikeTransient):
+        return _strike(problem, st, contacts, unit, diag)
     if not isinstance(an, DCSweep):
         i0 = st.currents()
         return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="equilibrium",
@@ -363,3 +416,60 @@ def _small_signal(problem: Problem, st: "_State", contacts: List[str], unit: str
                         sweep_contact=None, sweep_V=[0.0], currents=dc, current_unit=unit, flags=flags,
                         diagnostics=_json(diag), frequencies_Hz=[float(f) for f in an.frequencies_Hz],
                         y_real=yr, y_imag=yi, y_unit="S/cm**2" if problem.device.dimension == 1 else "S/cm")
+
+
+STRIKE_FLAGS = ["strike:fixed_bias: the contacts are held at their bias; a circuit node's voltage change does not "
+                "act back on the collection (no mixed mode)",
+                "strike:1d_column: the pairs are spread over the device area (no track radius, no 2D funnelling)"]
+
+
+def _strike(problem: Problem, st: "_State", contacts: List[str], unit: str, diag: dict) -> EngineResult:
+    """A17.2: ramp the biases, store the DC state for the transient, then backward Euler on the description's time
+    points with the generation rate at the end of each step."""
+    from devsim import set_parameter, solve
+    from simws.hub.adapter import NotConverged
+    an = problem.analysis
+    reached = "0 V"
+    try:
+        for b in an.bias:
+            st.ramp(b.contact, b.value_V, b.step_V)
+            reached = f"{b.contact} = {b.value_V:g} V"
+    except RuntimeError as e:
+        if not _no_convergence(e):
+            raise
+        raise NotConverged(f"strike bias: reached {reached}: {e}") from e
+    from devsim import get_contact_charge
+
+    def charges() -> Dict[str, float]:
+        return {c: float(get_contact_charge(device=DEVICE, contact=c, equation="PotentialEquation"))
+                for c in contacts}
+
+    cur: Dict[str, List[float]] = {k: [v] for k, v in st.currents().items()}
+    part: Dict[str, List[float]] = {k: list(v) for k, v in cur.items()}
+    q_prev = charges()
+    times = [0.0]
+    rate0 = an.pairs_cm2 / ((an.depth_um[1] - an.depth_um[0]) * UM)          # pairs/cm^3 per unit g
+    quad = 0.0
+    t_prev = 0.0
+    try:
+        solve(type="transient_dc", **st.opts)
+        for t in an.time_points_s():
+            g = float(an.g(t))
+            set_parameter(device=DEVICE, region=st.region, name=STRIKE_RATE, value=rate0 * g)
+            solve(type="transient_bdf1", tdelta=float(t - t_prev), charge_error=1e30, **st.opts)
+            quad += an.pairs_cm2 * g * (t - t_prev)
+            times.append(float(t))
+            q_now = charges()
+            for k, v in st.currents().items():                 # A17.4: particle + displacement (backward)
+                part[k].append(v)
+                cur[k].append(v + (q_now[k] - q_prev[k]) / (t - t_prev))
+            q_prev = q_now
+            t_prev = float(t)
+    except RuntimeError as e:
+        if not _no_convergence(e):
+            raise
+        raise NotConverged(f"strike transient: stopped after t = {t_prev:.4e} s: {e}") from e
+    diag = dict(diag, generated_pairs_quadrature_cm2=quad, n_time_points=len(times), particle_currents=part)
+    return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="strike", sweep_contact=None,
+                        sweep_V=[], currents=cur, current_unit=unit, flags=list(st.flags) + STRIKE_FLAGS,
+                        diagnostics=_json(diag), time_s=times)

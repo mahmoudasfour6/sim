@@ -48,7 +48,7 @@ def _pn_step(problem: Problem) -> Optional[Tuple[float, float, float]]:
     x >= xj (p side at the region's x_min), else None. Never raises."""
     dev = problem.device
     try:
-        if len(dev.doping) != 2 or dev.dimension != 1:
+        if len(dev.doping) != 2 or dev.dimension != 1 or dev.profiles:      # A16.5: no tabulated profiles
             return None
         acc = [t for t in dev.doping if t.species == "acceptor"]
         don = [t for t in dev.doping if t.species == "donor"]
@@ -93,7 +93,8 @@ def unsupported(problem: Problem) -> List[str]:
     dev, m, a = problem.device, problem.models, problem.analysis
     step = _pn_step(problem)
     if step is None:
-        out.append("doping: Charon translator supports an abrupt two-term pn step only")
+        out.append("doping: Charon translator supports an abrupt two-term pn step only"
+                   + (" (no tabulated profiles, A16.5)" if dev.profiles else ""))
     if m.tau_n_s != m.tau_p_s:
         out.append("srh: Charon deck takes one lifetime for both carriers")
     if not isinstance(a, DCSweep):

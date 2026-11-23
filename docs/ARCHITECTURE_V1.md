@@ -2071,3 +2071,237 @@ the method by which a figure was read.
    -0.6 % (25), +2.7 % (35), +5.9 % (50); arsenic, RustBCA Lindhard-Scharff amorphous peak position against
    Suzuki's Rpm: +25 % to +40 % (the means, 32 to 127 nm, are closer). So for boron the amorphous BCA (with the A12
    factor) and the SIMS fit's main peak agree to 6 %; for arsenic RustBCA's peak is deeper than the fit's.
+
+### A15, laptop run (19 Nov 2026)
+
+Update 10 on the owner's laptop, committed as f373ddb on arch/v1; master in ~/sim_workspace fast-forwarded to it.
+Fast tests 1573 passed, 9 skipped, 6 xfailed. Channeling acceptance 115 passed, 6 skipped (the checks that re-read
+the PDFs, which are not on the laptop). Every R84 and R87 line and the demo table are identical to the build
+machine's. The backup remote winbackup received master 53dd2a9, the tag and arch/v1 (before update 10); the push to
+GitHub (offsite) stopped at the username prompt.
+
+### A16 (23 Nov 2026, lead): thermal anneal (dopant diffusion) as a fifth problem family; DEVSIM and FiPy; the process chain implant -> anneal -> device -> circuit
+
+The owner asked for "Implant -> anneal -> device: the chain that connects the engines, with diffusion as a new family
+checked by two solvers".
+
+0. **What the lead had seen.** The EE212 class handout #12 (Plummer, Deal, Griffin, Stanford 1999-00, "Dopant
+   diffusion"; the basis of Table 7-5 of Plummer, Deal and Griffin, *Silicon VLSI Technology*, 2000), as hosted at
+   dunham.ece.uw.edu/ee528/notes/Chapter7.pdf, SHA-256 1eadb697...845da63, pages 9-18 read as text: the intrinsic
+   table (eq. 13, page 10), the charge-state table (eq. 19, page 18), the worked boron design of pages 12-14.
+   F. J. Morin and J. P. Maita, Phys. Rev. 96, 28 (1954), eq. (3): n_i^2 = 1.5e33 T^3 exp(-1.21 eV / kT), fitted
+   to points below 700 K. FiPy 3.4.5 installed on the build machine; one 1D diffusion solved to see that it runs.
+   No anneal of any kind had been computed by simws when items 0 to 9 were committed.
+1. **Description** (`simws/spec/anneal.py`, `AnnealProblem`, kind "anneal"): `dopant` one of B, P, As, Sb;
+   `initial` a depth profile (`depth_um` strictly increasing, >= 0; `concentration_cm3` >= 0; 2 to 20000 points;
+   linear interpolation between points, zero beyond the last; the first value holds from 0 to the first point);
+   `background_cm3` (>= 0) and `background_type` ("donor" or "acceptor"), uniform; `thickness_um` (> 0, at least
+   the last profile depth); `steps`: one or more isothermal steps (`temperature_C` 600 to 1400, `time_s` > 0);
+   `models.diffusivity` "intrinsic" (default) or "fermi"; `surface` "reflecting" (default: no flux, the dose is
+   kept) or "fixed" with `surface_concentration_cm3` (a constant source, e.g. a predeposition); the back side is
+   reflecting; `numerics.dx_um` (default 0.001, at most 20000 intervals) and `numerics.steps_per_anneal` (default
+   200). Each step's time points are t_k = time_s (k / N)^2, k = 1..N (the same points for every engine).
+2. **The physics (both engines solve exactly this).** dC/dt = d/dx (D h dC/dx), x the depth.
+   "intrinsic": h = 1 and D = D0 exp(-E / kT) from the handout's eq. (13): B 1.0 cm^2/s, 3.5 eV; As 9.17, 3.99;
+   Sb 4.58, 3.88; P 4.70, 3.68. "fermi": D = D0 + D- (n/ni) + D= (n/ni)^2 for donors (P, As, Sb) and
+   D = D0 + D+ (p/ni) for B, each term D.0 exp(-D.E / kT) from eq. (19): B D0 0.05/3.5, D+ 0.95/3.5; As D0
+   0.011/3.44, D- 31.0/4.15; Sb D0 0.214/3.65, D- 15.0/4.08; P D0 3.85/3.66, D- 4.44/4.0, D= 44.2/4.37.
+   n (or p for B) from charge neutrality with the background: N = C - Nb (background of the other type) or
+   C + Nb (same type), n = N/2 + sqrt(N^2/4 + ni^2); the field factor h = 1 + C / sqrt(N^2 + 4 ni^2) (the flux
+   of the ionised dopant in the built-in field, for one diffusing species on a uniform background).
+   ni = 3.87e16 T^1.5 exp(-0.605 eV / kT) cm^-3 (Morin and Maita, the square root of their eq. 3), k = 8.617333e-5
+   eV/K. Every "fermi" result carries `model:ni_morin_maita_extrapolated` (their fit stops at 700 K). Every result
+   carries `anneal:not_modelled: transient enhanced diffusion from implant damage, clustering, solid solubility,
+   oxidation and segregation`: the classical equation only.
+3. **Engines.** `devsim_anneal` (`simws/engines/devsim_anneal_engine.py`, family anneal, CODE "devsim"): DEVSIM 1D
+   mesh with nodes at k dx, the flux on each edge with the arithmetic mean of D h at its two nodes, backward
+   Euler on the time points of item 1, Newton to relative 1e-10. `fipy` (`simws/engines/fipy_engine.py`, family
+   anneal, CODE "fipy"): FiPy Grid1D cells of width dx (cell centres at (k + 1/2) dx), DiffusionTerm with D h
+   at the faces as FiPy interpolates it, TransientTerm (backward Euler) on the same time points, sweeps until the
+   largest relative change is below 1e-10 (at most 50). The initial profile is interpolated onto each engine's own
+   points. Both report the concentration at x_k = k dx, k = 0..M (FiPy: its face values). Two codes, so the two
+   are independent (A11.4). Capability: tested 800 to 1200 C (the range of the handout's plot); outside,
+   `extrapolated:`.
+4. **Result and adapters** `anneal.devsim_anneal`, `anneal.fipy` (env tcad): `anneal.concentration` (1/m^3 on the
+   depth axis, m), `anneal.dose` (1/m^2, trapezoid over the reported points), `anneal.Dt` (m^2, the sum over the
+   steps of the intrinsic D times the time, for context), `anneal.junction_depth` (m; only with a background of
+   the other type: the first depth where C falls to the background, linear between points; none, and the flag
+   `anneal:no_junction`, when C stays above it or starts below it). Deterministic: `budget:none` (the uncertainty
+   of the diffusivity tables is not included and the flag says so: `budget:model_not_included`). Citations
+   plummer2000, morin1954, devsim, fipy (Guyer, Wheeler, Warren, Comput. Sci. Eng. 11(3), 6 (2009)).
+5. **Profile doping for devices.** `DeviceSpec.profiles`: a list of `ProfileTerm` (species donor or acceptor;
+   `axis` "x" or "y"; `position_um` strictly increasing, `concentration_cm3` >= 0, 2 to 20000 points; linear
+   interpolation, zero outside [first, last]). Terms add to the boxes in `doping_at`. Left out of the serialised
+   description when empty, so no existing id changes. DEVSIM evaluates it at every node (node solutions added to
+   the doping expressions); Charon refuses it ("doping:"); devsim_eb inherits DEVSIM's handling.
+6. **Chain** (`simws/chain/process.py`): `initial_from_implant(result, dose_cm2)` (implant.concentration, or
+   implant.profile x dose); `anneal_problem(...)`; `diode_from_anneal(result, ...)` (a 1D device: the annealed
+   dopant as a ProfileTerm on the background box, contact at the surface and at the back, a DC sweep);
+   then `chain.diode.fit_shockley` and `circuit_from_fit` (A9.6) as before. A demo, `tools/v1_process_demo.py`.
+7. **Acceptance (tolerances fixed here, before any anneal has been computed).**
+   R90 (Gaussian, "intrinsic", reflecting, both engines): B at 1000 C for 1800 s from (a) a half Gaussian at the
+   surface, sigma0 = 0.02 um, Q = 1e14 cm^-2 and (b) a Gaussian at Rp = 0.1 um, sigma0 = 0.03 um with its image
+   in the surface, Q = 1e14; thickness 1 um, default numerics. Against the exact solution (the same form with
+   sigma^2 = sigma0^2 + 2 D t): largest deviation at most 1 % of the exact peak; the standard deviation of (a)
+   (about the surface) within 0.5 %.
+   R91 (erfc, "intrinsic", fixed surface 1e19, zero initial, B at 1000 C 1800 s, both): C = Cs erfc(x / 2 sqrt(D
+   t)) within 1 % of Cs at every point; the dose within 1 % of 2 Cs sqrt(D t / pi).
+   R92 (successive steps): 1000 C 900 s then 1100 C 600 s against one Gaussian with the summed Dt (eq. 14),
+   case R90(a): within the R90 tolerances.
+   R93 (dose): reflecting surface, every case here and in R94: the final dose equals the initial dose of the
+   engine's own interpolated profile within 1e-6 relative.
+   R94 (the two engines, "fermi", no exact answer): As (Rp 0.03 um, sigma 0.012 um, 1e15 cm^-2) into p-type 1e16 at
+   1000 C 600 s; P (0.05, 0.02, 5e15) into p-type 1e16 at 1000 C 600 s; B (0.1, 0.035, 1e15) into n-type 1e16 at
+   1000 C 1800 s; thickness 1 um. Largest difference of the profiles at most 1 % of the peak; junction depths within
+   1 %; doses within 1e-6.
+   R95 (the Fermi model's limits): at C << ni the "fermi" D equals the sum of the eq. (19) terms with n = ni
+   (h = 1 within 1e-6); for C >> ni with no background h tends to 2; the R94 "fermi" junctions are deeper than the
+   "intrinsic" ones for As and P at 1000 C (concentration-enhanced diffusion).
+   R96 (the handout's worked design, pages 12-14): Q = 4.3e13 cm^-2 of B in a half Gaussian with sigma0 = 0.005
+   um, n-type background 1e15, 1100 C for 6.8 h, "intrinsic", thickness 10 um, dx 0.005 um. Gate: the junction
+   depth within 1 % of the closed form x_j = sqrt(4 D t ln(Q / (sqrt(pi D t) C_B))) with the table's D (the
+   sigma0 term is negligible). Reported: the depth against the handout's 3 um, and D(1100 C), D(950 C) against
+   the handout's 1.5e-13 and 4.2e-15. (Written first with a 3 % gate against the handout's 3 um; the lead's own
+   arithmetic, before any code ran, gives D(1100 C) = 1.42e-13 from the table, so x_j = 2.90 um, 3.5 % below the
+   handout's rounded design: that gate tested the handout's rounding, not the code, and was replaced.)
+   R97 (profile doping): for a device with a ProfileTerm (and boxes), DEVSIM's NetDoping at every node equals
+   doping_at within 1e-12 relative; the ids of `pn_diode_1d()`, the HBT and every library device are unchanged.
+   R98 (refusals, reason prefixes): a device engine or an implant engine given an AnnealProblem ("problem kind:");
+   Charon given a ProfileTerm ("doping:").
+   R99 (chain, reported): B 35 keV 1e14 cm^-2 into n-type 1e16 (RustBCA, "empirical") -> 1000 C 1800 s "fermi"
+   on both engines -> DEVSIM diode -> Shockley fit -> ngspice: junction depths of the two engines (gate: 1 %), Js
+   and N of the fit, the ngspice current at 0.6 V against the device's.
+8. **Trust.** Two independent engines: an anneal result whose `anneal.junction_depth` and `anneal.dose` were
+   compared with the other engine's and passed (1 %, 1e-6) is "verified". Nothing here is "validated": no
+   measured profile is used (SIMS after anneal would be the next source).
+9. **Not in A16.** Implant damage and transient enhanced diffusion, two-dimensional diffusion, ramps, oxidation,
+   several dopants at once. Each is a refusal ("dopant:", "steps:") or the flag of item 2.
+10. **After the checker's report (23 Nov).** 184 tests written from A16 and the two PDFs (tests/v1/test_anneal.py);
+   178 passed and 6 failed at first. The PDFs' numbers equal item 2 (eq. 13, eq. 19, Morin and Maita eq. 3, the
+   design numbers of pages 12-14).
+   **One implementation defect, found by the checker and fixed:** for a profile that drops to zero, devsim_anneal
+   returned round-off values just below zero ahead of the diffusion front (e.g. -2e-316 cm^-3), and the hub refused
+   the valid result ("must be non-negative"). Values below zero by less than 1e-12 of the peak are now reported as
+   0 (their count is in the diagnostics, `negative_roundoff_set_to_zero`); larger negatives are left for the hub's
+   check. FiPy was not affected.
+   **One contract defect, found by the checker, decided by the lead:** R94 and item 8 compared the two engines'
+   doses within 1e-6. The engines sample the starting profile at different points (DEVSIM at k dx, FiPy at
+   (k + 1/2) dx, item 3), so for a profile with a slope at the surface their starting doses already differ (R94
+   read literally, a Gaussian cut at the surface: As 3.83e-5, P 1.38e-5, B 1.97e-6), and the final doses differ by
+   exactly that while each engine keeps its own dose to 1e-13. That gate measured the sampling of the input, not
+   the solvers. Now: R94's dose gate is "the engines' final doses differ by at most the difference of their starting
+   doses plus 1e-6" (each engine's own conservation stays gated at 1e-6 by R93 and by the adapter's self-check);
+   item 8's trust comparison is the junction depth only (1 %). R94 is run both ways (cut at the surface, and with
+   its image as in R90(b) and `chain.process.gaussian_profile`); every other R94 number passes both ways.
+   **Results:** R90 0.22 % of peak (limit 1 %), sigma 0.002 % (0.5 %); R91 0.09 % of Cs, dose -0.08 % (1 %); R92
+   0.19 %; R93 5.3e-13 (1e-6); R94 profiles within 0.018 % of peak, junctions within 0.043 % (1 %); R95 h - 1 <=
+   1e-6 at C = 1e-6 ni, h = 2 within 1e-6 at C = 1e4 ni, Fermi junctions deeper (As 144 against 111 nm, P 404
+   against 255 nm); R96 x_j 2.914 um on both engines against the closed form 2.899 um (+0.52 %, limit 1 %; the
+   handout's design says 3 um; D(1100 C) 1.426e-13 against its 1.5e-13, D(950 C) 3.79e-15 against 4.2e-15); R97
+   NetDoping equal to doping_at within 2e-16, every library id unchanged; R98 refusals as stated. R99: junctions
+   431.38 and 431.39 nm (0.0004 %), Js 1.111e-6 A/m^2, N 1.0089, ngspice -1.12 % against the device at 0.6 V.
+   Gaps the checker noted, recorded as the behaviour: no junction quantity and no flag when the background is of
+   the dopant's own type or zero; morin1954 is cited on intrinsic results too; both budget flags are set.
+
+### A17 (23 Nov 2026, lead): a TCAD strike current as the circuit pulse (no assumed pulse shape)
+
+The owner asked for "TCAD strike -> circuit pulse, to remove the assumed pulse shape from the upset calculation".
+Until now (A10) the critical charge used Messenger's double exponential with time constants given by hand.
+
+0. **What the lead had seen.** The legacy DEVSIM strike (`simws/tcad/particle_strike.py`, a 2D replica of Charon's
+   particleStrike test, agreeing with Charon to 0.9 % of peak) and the generation hook of `simws.tcad.physics.
+   setup_region` (`extra_generation`, pairs/cm^3/s added to both continuity equations). DEVSIM's contact current
+   is the particle current (no displacement current). No strike had been run on the v1 path when items 0 to 8
+   were committed.
+1. **Description.** A device analysis `StrikeTransient` (kind "strike"), 1D devices only: `bias` (a list of Bias,
+   ramped first in the order given; other contacts at 0 V); `pairs_cm2` (> 0, electron-hole pairs per cm^2 of
+   device area); `depth_um` (start < stop, inside the device): the pairs are generated uniformly over that depth
+   segment; `t_peak_s` and `sigma_s` (> 0, t_peak >= 4 sigma): the time profile is a Gaussian truncated to
+   [t_peak - 4 sigma, t_peak + 4 sigma] and renormalised to unit area; `t_stop_s` (> t_peak + 4 sigma);
+   `steps_per_sigma` (default 10) and `points_per_decade` (default 20). Time points (the same for every engine,
+   `time_points_s()`): 10 points geometric from 1e-3 (t_peak - 4 sigma) to t_peak - 4 sigma; then uniform steps of
+   sigma / steps_per_sigma to t_peak + 4 sigma; then geometric at points_per_decade to t_stop_s. A new kind in the
+   Analysis union changes no existing id.
+2. **Physics.** The device's drift-diffusion models unchanged, plus G(x, t) = pairs_cm2 / (stop - start) x g(t) in
+   pairs/cm^3/s inside the segment, g the truncated unit-area Gaussian. Backward Euler with the source at the end
+   of each step (as the legacy replica). On the mesh, the footprint (1 inside, 0 outside, 1/2 at a node exactly on
+   an end) is scaled so that its node-volume integral equals stop - start exactly: the generated pairs are exact
+   up to the time quadrature, whose sum is reported.
+3. **Engine.** DEVSIM only (`analyses` gains "strike"); Charon and devsim_eb refuse ("analyses:"); no mesh study
+   for "strike" (as for small_signal, A6.6). One engine: every strike result is "unverified" by rule.
+4. **Result.** `EngineResult` gains `time_s`; analysis "strike"; `currents` per contact per time point (the first
+   point is t = 0, at the bias, before any generation). Adapter quantities (1D, canonical): `tr.I.<contact>`
+   (A/m^2 on the axis "time", s, positive into the device), `tr.Q.<contact>` (C/m^2, the trapezoid integral of
+   I(t) - I(0) over the time points), `tr.Q_generated` (C/m^2, q x pairs_cm2 x 1e4, exact), diagnostics
+   `generated_pairs_quadrature_cm2` (the engine's time sum). Flags on every strike result: `strike:fixed_bias: the
+   contacts are held at their bias; a circuit node's voltage change does not act back on the collection (no
+   mixed mode)` and `strike:1d_column: the pairs are spread over the device area (no track radius, no 2D
+   funnelling)`.
+5. **Chain** (`simws/chain/see.py`): `strike_problem(device_problem, charge_C, area_m2)` (pairs_cm2 = charge /
+   (q area)); `tcad_pulse(device_result, contact, area_m2)`: a Pwl of (I(t) - I(0)) x area at the contact (sign as
+   collected: positive = current into the device, i.e. drawn from the circuit node); `critical_charge_tcad(hub,
+   circuit, node, threshold_V, device_problem, contact, area_m2, q_low_C, q_high_C, rel_tol=1e-3,
+   rerun=True)`: the same bisection as A10, each step running the device at that charge (`rerun`) or scaling one
+   device pulse linearly (`rerun=False`, flagged `strike:linear_scaling`); returns the A10 fields plus the device
+   result ids and the collected charge at q_crit. `critical_charge` (Messenger) is kept unchanged.
+6. **Acceptance (tolerances fixed here, before any strike has been computed on this path).** The reference
+   device: 1D, 5 um, n+ 1e19 on [0, 0.2) um over p 1e16, contacts "top" (x = 0) and "back"; ModelSpec defaults
+   (Masetti, Scharfetter SRH, Auger, Slotboom); top at +1 V (reverse bias); generation on [0.25, 0.6] um (inside
+   the depletion region); t_peak 20 ps, sigma 5 ps, t_stop 1 us; mesh 1 nm to 1 um and 20 nm after.
+   R100 (collection): pairs 1e11 cm^-2: Q_top / Q_generated within 1 % of 1, Q_back / Q_generated within 1 % of -1.
+   R101 (time steps): steps_per_sigma 20 and points_per_decade 40 against the defaults: Q_top within 0.5 %, peak
+   |I_top| within 2 %.
+   R102 (mesh): mesh hints scale 0.5 against 1: Q_top within 0.5 %, peak within 2 %.
+   R103 (low-injection linearity): pairs 1e10 against 1e11: the collected fractions within 1 % of each other and
+   the peak currents in the ratio 10 within 2 %. Reported (no gate): the collected fraction and the peak per pair
+   at 1e12 and 1e13 (high injection, the reason for `rerun`).
+   R104 (Kirchhoff): at every time point |I_top + I_back| at most 2 % of the largest |I_top| (the displacement
+   current at the contacts is not in the particle current; this bounds what is missing).
+   R105 (quadrature): the reported quadrature sum within 1e-3 of pairs_cm2.
+   R106 (the chain, reported): a node held at 1 V by 10 kOhm from a 1 V supply with 1 fF to ground, threshold
+   0.5 V, the reference device at 1 um^2 on the node: q_crit with the TCAD pulse (rerun), with the TCAD pulse
+   scaled linearly, and with Messenger's pulse at (1 ps, 10 ps) as in A10; the collected charge at q_crit.
+   R107 (refusals and ids): a 2D device ("strike:"), Charon and devsim_eb ("analyses:"), a mesh study ("mesh_study:");
+   descriptions with t_peak < 4 sigma, t_stop <= t_peak + 4 sigma, or a segment outside the device are invalid;
+   every library problem keeps its id.
+7. **Trust.** One engine: "unverified". The model-form limits are the two flags of item 4. Fully coupled mixed mode
+   (the legacy `simws/tcad/mixed_mode.py`) is the next step and the natural check of the fixed-bias assumption.
+8. **Not in A17.** 2D or axisymmetric strikes, a track radius, LET along a track from G4SEE (the deposit enters as
+   a charge), mixed mode on the v1 path.
+9. **Two corrections after the lead's first development runs (23 Nov), before the checker wrote any test; no
+   tolerance changed.** (a) Item 4's `tr.Q` was the trapezoid integral of I(t) - I(0). Backward Euler conserves
+   charge with the sum over steps of I_k (t_k - t_{k-1}) (each step's current is that step's mean); the trapezoid
+   adds half of sum (I_{k-1} - I_k)(t_k - t_{k-1}), which on the reference device overstated the collected charge
+   by 5.7 % (top) and 6.3 % (back) with the backward sum at 0.99998 for both. `tr.Q` is now that backward sum, and
+   `tcad_pulse` is a staircase (I_k held over (t_{k-1}, t_k], corners 1e-4 of the step apart) so the circuit
+   receives the same charge. (b) Item 0 noted that DEVSIM's contact current is the particle current only. On the
+   reference device the particle currents at the two contacts differ by up to 14 % of the peak during the pulse
+   (the displacement current eps dE/dt in the neutral p region carrying the pulse is not small), so the particle
+   current is not the terminal current a circuit sees. `tr.I.<contact>` is now the particle current plus the
+   displacement current, the backward difference of the contact charge (DEVSIM's get_contact_charge on the
+   potential equation) over each step; with it the two contacts agree to 4e-10 of the peak. The particle
+   currents stay in the diagnostics (`particle_currents`). R104 keeps its 2 % gate.
+10. **After the checker's report (23 Nov).** 57 tests written from A17 (tests/v1/test_strike_pulse.py); 56 passed,
+   1 failed. No implementation defect was found.
+   **Recorded FAIL, R103 (peak ratio):** the peak current at 1e11 pairs/cm^2 is 9.615 times that at 1e10 (limit: 10
+   within 2 %). The collected fractions agree to 8e-6 (limit 1 %). The checker ran more deposits outside the gate:
+   peak per pair 6.047e-5, 6.044e-5, 6.023e-5, 5.974e-5, 5.791e-5 A/m^2 per pair/cm^2 at 1e8, 1e9, 1e10, 3e10, 1e11,
+   with the peak time unchanged (25.5 ps) and R101 / R102 showing the peak converged to 0.3 % and 0.004 %. So the
+   code is linear in the low-injection limit (1e8 against 1e9: 0.035 %), and the failure is the lead's choice of
+   1e11 as "low injection": 1e11 over 0.35 um is about 0.3 of the p doping. The gate is kept as written and the
+   test is a strict xfail; the 1e8 / 1e9 numbers are reported, not a gate fixed after the fact.
+   **Results:** R100 Q_top / Q_generated 0.999982 and Q_back -0.999982 (limit 1 %); R101 Q 8.1e-7, peak 3.1e-3 (0.5 %,
+   2 %); R102 Q 2.7e-7, peak 4.3e-5; R103 fractions 8.3e-6 (1 %); R104 at most 3.9e-9 of the peak (2 %); R105
+   quadrature 8.9e-7 (1e-3); tcad_pulse integral against tr.Q x area 5.7e-6; R107 refusals as stated, every library
+   id unchanged. R103 reported: collected fraction / peak per pair 0.99989 / 2.61e-5 at 1e12, 0.9714 / 3.30e-6 at
+   1e13 (high injection: the peak saturates and the pulse spreads, which is why `rerun` is the default).
+   **R106 (reported):** with the node of R106 (10 kOhm, 1 fF) and A10's circuit window (step 0.1 ps, stop 300 ps),
+   Messenger's pulse gives q_crit 1.367 fC; neither TCAD pulse upsets the node up to 100 fC: at 1 um^2 the device's
+   current saturates near 49 uA (100 fC: collected 79 %, peak at 564 ps), and 49 uA x 10 kOhm < 0.5 V, so the node
+   cannot reach the threshold whatever the window (3 ns: v_min 0.510 V). The lead's demo adds, as context, the same
+   node through 100 kOhm: q_crit 0.754 fC (TCAD rerun), 12.29 fC (one 100 fC pulse scaled down), 0.646 fC
+   (Messenger). The fixed-shape assumptions are where the answers part.
+   **Wording, recorded as implemented:** the mesh "1 nm to 1 um and 20 nm after" is the hint lines (0, 1 nm), (1 um,
+   1 nm), (5 um, 20 nm), so the spacing grades from 1 nm to 20 nm between 1 and 5 um; the geometric tail has
+   ceil(decades x points_per_decade) points; with t_peak = 4 sigma the 10 geometric head points are absent;
+   `critical_charge_tcad` returns the A10 fields except the Messenger time constants.

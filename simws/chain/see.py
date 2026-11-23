@@ -148,3 +148,129 @@ def upset_probability(see_result, qcrit: Dict[str, Any], pair_energy_eV: float =
     pp = (P * n + 1) / (n + 2)
     return {"P": P, "P_low": P_low, "P_high": P_high, "sigma": math.sqrt(pp * (1 - pp) / n), "E_crit_eV": e_c,
             "n_events": n, "flags": sorted(set(flags))}
+
+
+# ------------------------------------------------------------------------------------------- A17: the TCAD pulse
+LINEAR_FLAG = "strike:linear_scaling: one device pulse scaled with the charge (the shape is taken as independent " \
+              "of the charge)"
+
+
+def reference_strike_diode(pairs_cm2: float = 1e11, top_V: float = 1.0, depth_um=(0.25, 0.6),
+                           t_peak_s: float = 20e-12, sigma_s: float = 5e-12, t_stop_s: float = 1e-6,
+                           steps_per_sigma: int = 10, points_per_decade: int = 20, mesh_scale: float = 1.0):
+    """The reference device of A17.6: 1D, 5 um, n+ 1e19 on [0, 0.2) um over p 1e16, contacts "top" (x = 0) and
+    "back", ModelSpec defaults, top at +top_V (reverse bias), mesh 1 nm to 1 um then 20 nm."""
+    from simws.spec.schema import (Bias, Box, Contact, DeviceSpec, DopingTerm, MeshHints, ModelSpec, Numerics,
+                                   Problem, Region, StrikeTransient)
+    L = 5.0
+    dev = DeviceSpec(
+        name="strike_diode_1d", dimension=1,
+        regions=[Region(name="si", material="silicon", box=Box(x=(0.0, L)))],
+        contacts=[Contact(name="top", region="si", side="x_min"), Contact(name="back", region="si", side="x_max")],
+        doping=[DopingTerm(species="donor", concentration_cm3=1e19, box=Box(x=(None, 0.2)), label="n+"),
+                DopingTerm(species="acceptor", concentration_cm3=1e16, box=Box(), label="p substrate")],
+        mesh=MeshHints(x_lines=[(0.0, 0.001), (1.0, 0.001), (L, 0.02)], scale=mesh_scale),
+        description="n+/p diode for the strike transient of A17.6")
+    an = StrikeTransient(bias=[Bias(contact="top", value_V=top_V)], pairs_cm2=pairs_cm2, depth_um=tuple(depth_um),
+                         t_peak_s=t_peak_s, sigma_s=sigma_s, t_stop_s=t_stop_s, steps_per_sigma=steps_per_sigma,
+                         points_per_decade=points_per_decade)
+    return Problem(device=dev, models=ModelSpec(), analysis=an,
+                   numerics=Numerics(relative_error=1e-10, absolute_error=1e10, max_iterations=100))
+
+
+def strike_problem(device_problem, charge_C: float, area_m2: float):
+    """A copy of a strike Problem whose deposit generates `charge_C` coulombs in a device of `area_m2`."""
+    if device_problem.analysis.kind != "strike":
+        raise ValueError("strike_problem: the device problem needs a strike analysis")
+    if not charge_C > 0 or not area_m2 > 0:
+        raise ValueError("strike_problem: charge_C and area_m2 must be > 0")
+    pairs = float(charge_C) / Q_E / (float(area_m2) * 1e4)          # per cm^2
+    return device_problem.with_changes({"analysis.pairs_cm2": float(f"{pairs:.12g}")})
+
+
+def tcad_pulse(device_result, contact: str, area_m2: float):
+    """A17.5: the pulse at `contact` of a stored device strike result (A): (I(t) - I(0)) x area, positive = current
+    into the device at that contact, i.e. drawn from the circuit node it hangs on. Backward Euler gives one current
+    per step (the step's mean), so the Pwl is a staircase: I_k held over (t_{k-1}, t_k], the corners 1e-4 of the
+    step apart; its integral is the device's tr.Q to about 1e-4."""
+    from simws.spec.circuit import Pwl
+    q = device_result.q(f"tr.I.{contact}")
+    t = np.asarray(q.axes[0].values, float)
+    i = (np.asarray(q.to("A/m**2"), float) - float(np.asarray(q.to("A/m**2"))[0])) * float(area_m2)
+    pts = [(float(t[0]), 0.0)]
+    for k in range(1, t.size):
+        dt = t[k] - t[k - 1]
+        pts.append((float(t[k - 1] + 1e-4 * dt), float(i[k])))
+        pts.append((float(t[k]), float(i[k])))
+    return Pwl(points=pts)
+
+
+def _pulse_charge(pulse) -> float:
+    pts = np.asarray(pulse.points, float)
+    return float(np.trapezoid(pts[:, 1], pts[:, 0]))
+
+
+def _scaled(pulse, factor: float):
+    from simws.spec.circuit import Pwl
+    return Pwl(points=[(float(t), float(v) * factor) for t, v in pulse.points])
+
+
+def critical_charge_tcad(hub, problem, node: str, threshold_V: float, device_problem, contact: str,
+                         area_m2: float, q_low_C: float, q_high_C: float, polarity: str = "discharge",
+                         rel_tol: float = 1e-3, max_runs: int = 60, rerun: bool = True) -> Dict[str, Any]:
+    """A17.5: the A10 bisection with the device's own current as the pulse. rerun=True runs the device at every
+    trial charge; rerun=False runs it once at q_high_C and scales that pulse linearly (flag LINEAR_FLAG)."""
+    if not 0 < q_low_C < q_high_C:
+        raise ValueError("critical_charge_tcad: need 0 < q_low_C < q_high_C")
+    ids, dev_ids, collected = [], [], {}
+    base = {}
+
+    def pulse_for(q: float):
+        if not rerun and "pulse" in base:
+            return _scaled(base["pulse"], q / base["q"])
+        dp = strike_problem(device_problem, q if rerun else q_high_C, area_m2)
+        r = hub.submit("device.devsim", params={"problem": dp})
+        if r.status != "ok":
+            raise RuntimeError(f"critical_charge_tcad: device job for {q:.4e} C: {r.status}: {r.message}")
+        dev_ids.append(r.id)
+        p = tcad_pulse(hub.result(r.id), contact, area_m2)
+        collected[q if rerun else q_high_C] = _pulse_charge(p)
+        if not rerun:
+            base.update(pulse=p, q=q_high_C)
+            return _scaled(p, q / q_high_C)
+        return p
+
+    def upset(q: float) -> bool:
+        p = inject(problem, node, pulse_for(q), polarity)
+        r = hub.submit("circuit.ngspice", params={"problem": p})
+        if r.status != "ok":
+            raise RuntimeError(f"critical_charge_tcad: circuit job for {q:.4e} C: {r.status}: {r.message}")
+        ids.append(r.id)
+        x = _extreme(r, node, polarity)
+        return x <= threshold_V if polarity == "discharge" else x >= threshold_V
+
+    lo, hi = float(q_low_C), float(q_high_C)
+    if not rerun:
+        pulse_for(hi)
+    if upset(lo):
+        raise ValueError(f"critical_charge_tcad: q_low_C = {lo:.4e} C already upsets the node; lower it")
+    if not upset(hi):
+        raise ValueError(f"critical_charge_tcad: q_high_C = {hi:.4e} C does not upset the node; raise it")
+    while (hi - lo) / hi > rel_tol:
+        if len(ids) >= max_runs:
+            raise RuntimeError(f"critical_charge_tcad: {max_runs} runs without reaching rel_tol {rel_tol:g}")
+        mid = 0.5 * (lo + hi)
+        if upset(mid):
+            hi = mid
+        else:
+            lo = mid
+    qc = 0.5 * (lo + hi)
+    if rerun:
+        q_near = min(collected, key=lambda k: abs(k - qc))
+        frac = collected[q_near] / q_near
+    else:
+        frac = collected[q_high_C] / q_high_C
+    return {"qcrit_C": qc, "q_lo_C": lo, "q_hi_C": hi, "runs": len(ids), "result_ids": ids,
+            "device_result_ids": dev_ids, "collected_fraction": float(frac), "collected_at_qcrit_C": float(frac * qc),
+            "node": node, "threshold_V": float(threshold_V), "polarity": polarity, "rerun": bool(rerun),
+            "flags": [] if rerun else [LINEAR_FLAG]}

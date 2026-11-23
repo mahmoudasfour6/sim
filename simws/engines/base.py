@@ -30,7 +30,7 @@ class EngineResult(BaseModel):
 
     engine: str
     problem_id: str
-    analysis: Literal["equilibrium", "dc_sweep", "small_signal"]
+    analysis: Literal["equilibrium", "dc_sweep", "small_signal", "strike"]
     sweep_contact: Optional[str] = None            # None for equilibrium
     sweep_V: List[float]                           # [0.0] for equilibrium
     currents: Dict[str, List[float]]               # contact name -> current into the device, one per sweep value
@@ -42,6 +42,7 @@ class EngineResult(BaseModel):
     y_real: Dict[str, List[float]] = {}            # keys "11", "12", "21", "22": one value per frequency
     y_imag: Dict[str, List[float]] = {}
     y_unit: Optional[Literal["S/cm**2", "S/cm"]] = None    # 1D: per cm^2 of cross-section; 2D: per cm of depth
+    time_s: List[float] = []                       # strike only (A17.4): the time points, the first one t = 0
 
 
 def _fmt(v: Any) -> str:
@@ -330,3 +331,47 @@ class CircuitCapability(BaseModel):
             out.append(f"libraries: {len(problem.libraries)} model librar{'y' if len(problem.libraries) == 1 else 'ies'}"
                        f" outside the description (their content is never tested)")
         return out
+
+
+# ---------------------------------------------------------------------------------------------------- anneal (A16)
+class AnnealResult(BaseModel):
+    """Engine-neutral result of an AnnealProblem (contract A16.3): the concentration at x_k = k dx after the steps."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    problem_id: str
+    depth_um: List[float]                          # k dx, k = 0..M
+    concentration_cm3: List[float]
+    initial_dose_cm2: float                        # the engine's own interpolated starting profile (A16.7 R93)
+    flags: List[str] = []
+    diagnostics: Dict[str, Any] = {}
+
+
+class AnnealCapability(BaseModel):
+    """What an anneal engine can run. Every list holds the ALLOWED values."""
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    env: str
+    description: str
+    in_process: bool
+    dopants: List[str]
+    diffusivity: List[str]
+    surfaces: List[str]
+    tested_temperature_C: Tuple[float, float]
+    notes: str = ""
+
+    def unsupported(self, problem) -> List[str]:
+        out: List[str] = []
+        if problem.dopant not in self.dopants:
+            out.append(f"dopant: {_fmt(problem.dopant)} not in {_fmt(self.dopants)}")
+        if problem.models.diffusivity not in self.diffusivity:
+            out.append(f"diffusivity: {_fmt(problem.models.diffusivity)} not in {_fmt(self.diffusivity)}")
+        if problem.surface not in self.surfaces:
+            out.append(f"surface: {_fmt(problem.surface)} not in {_fmt(self.surfaces)}")
+        return out
+
+    def outside_tested_range(self, problem) -> List[str]:
+        lo, hi = self.tested_temperature_C
+        return [f"temperature_C: {s.temperature_C:g} outside tested [{lo:g}, {hi:g}]" for s in problem.steps
+                if not lo <= s.temperature_C <= hi]

@@ -74,9 +74,10 @@ def test_registry_entry_family_adapter_code():
 def test_code_of_every_other_engine_is_its_name():
     """A11.4: CODE is the engine's name when absent; only devsim_eb sets another code (A11.3)."""
     from simws import engines
-    others = [n for n in engines.names() if n not in ("devsim_eb", "g4implant", "channeling")]   # amended by the lead (A13.3, A15.5)
+    others = [n for n in engines.names() if n not in ("devsim_eb", "g4implant", "channeling", "devsim_anneal")]   # amended by the lead (A13.3, A15.5, A16.3)
     assert engines.code("g4implant") == "geant4"
     assert engines.code("channeling") == "published_fits"   # amended by the lead (A15.5)
+    assert engines.code("devsim_anneal") == "devsim"   # amended by the lead (A16.3)
     assert {"devsim", "charon"} <= set(others)
     for n in others:
         assert engines.code(n) == n, (n, engines.code(n))

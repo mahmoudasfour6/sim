@@ -53,6 +53,17 @@ REGISTRY: Dict[str, dict] = {
                        title="Compact and comprehensive database for ion-implanted As profile",
                        journal="IEEE Transactions on Electron Devices", volume="47", number="1", pages="44--49",
                        year="2000", doi="10.1109/16.817565", checked=True),
+    "plummer2000": dict(type="misc", author="J. D. Plummer and M. D. Deal and P. B. Griffin",
+                        title="Dopant diffusion, EE212 class handout 12 (Stanford, 1999-00); the basis of Table 7-5 of "
+                              "Silicon VLSI Technology: Fundamentals, Practice and Modeling (Prentice Hall, 2000)",
+                        year="2000", url="https://dunham.ece.uw.edu/ee528/notes/Chapter7.pdf", checked=True),
+    "morin1954": dict(type="article", author="F. J. Morin and J. P. Maita",
+                      title="Electrical Properties of Silicon Containing Arsenic and Boron", journal="Physical Review",
+                      volume="96", number="1", pages="28--35", year="1954", doi="10.1103/PhysRev.96.28", checked=True),
+    "fipy": dict(type="article", author="J. E. Guyer and D. Wheeler and J. A. Warren",
+                 title="FiPy: Partial Differential Equations with Python",
+                 journal="Computing in Science \\& Engineering", volume="11", number="3", pages="6--15", year="2009",
+                 doi="10.1109/MCSE.2009.52", checked=True),
     "holmstrom2008": dict(type="article", author="E. Holmstrom and A. Kuronen and K. Nordlund",
                           title="Threshold defect production in silicon determined by density functional theory "
                                 "molecular dynamics simulations",

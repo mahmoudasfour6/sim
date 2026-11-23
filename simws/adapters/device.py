@@ -53,9 +53,9 @@ class DeviceAdapter(Adapter):
     def prepare(self, job, ctx) -> None:
         super().prepare(job, ctx)
         from simws import engines
-        if self._study(job) and _problem(job.key.params).analysis.kind == "small_signal":    # A6.6
-            raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: not available for small_signal yet "
-                               f"(small-signal results are screening fidelity)")
+        if self._study(job) and _problem(job.key.params).analysis.kind in ("small_signal", "strike"):   # A6.6, A17.3
+            raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: not available for "
+                               f"{_problem(job.key.params).analysis.kind} yet (screening fidelity)")
         if self._study(job) and not engines.module(self.ENGINE).CAPABILITY.mesh_study:      # A4.2
             raise InvalidInput(f"unsupported by {self.ENGINE}: mesh_study: {self.ENGINE} cannot refine its mesh "
                                f"(so it cannot give paper-fidelity results)")
@@ -91,6 +91,8 @@ class DeviceAdapter(Adapter):
 
     def collect(self, job, ctx, raw):
         res, problem, levels = raw["result"], raw["problem"], raw.get("levels")
+        if res.analysis == "strike":
+            return self._strike(ctx, raw)
         unit, factor = _UNITS[res.current_unit]
         floor = _FLOOR[unit]
         scalar = res.analysis in ("equilibrium", "small_signal")       # one operating point: scalars
@@ -142,6 +144,36 @@ class DeviceAdapter(Adapter):
                 ctx.flags.append(MS.NOT_ASYMPTOTIC_FLAG)
         return qs
 
+    def _strike(self, ctx, raw) -> list:
+        """A17.4: tr.I.<contact> over time, tr.Q.<contact> (backward sum of I - I(0)), tr.Q_generated (exact), and the
+        Kirchhoff residual as the largest |sum of currents| over the largest |current|."""
+        from simws.chain.see import Q_E
+        res, problem = raw["result"], raw["problem"]
+        unit, factor = _UNITS[res.current_unit]
+        ctx.flags += [f for f in res.flags if f not in ctx.flags]
+        ctx.flags += ["extrapolated:" + s for s in raw["outside"]]
+        ctx.diagnostics.update({"problem_id": problem.problem_id(), "engine": res.engine, "analysis": "strike",
+                                "device": problem.device.name, "temperature_K": problem.models.temperature_K,
+                                **res.diagnostics})
+        t = np.asarray(res.time_s, float)
+        axes = [{"name": "time", "unit": "s", "values": t.tolist()}]
+        qunit = {"A/m**2": "C/m**2", "A/m": "C/m"}[unit]
+        qs, I = [], []
+        for name, vals in res.currents.items():
+            v = np.asarray(vals, float) * factor
+            I.append(v)
+            qs.append(ctx.quantity(f"tr.I.{name}", v.tolist(), unit, axes=axes, conventions=CUR))
+            # A17.4 (corrected): the backward-Euler sum, sum_k (I_k - I_0)(t_k - t_{k-1}), the quadrature the
+            # time stepping conserves charge with
+            qs.append(ctx.quantity(f"tr.Q.{name}", float(np.sum((v[1:] - v[0]) * np.diff(t))), qunit,
+                                   conventions=CUR))
+        an = problem.analysis
+        qs.append(ctx.quantity("tr.Q_generated", Q_E * an.pairs_cm2 * 1e4, qunit))
+        I = np.array(I)
+        worst = float(np.max(np.abs(I.sum(axis=0))) / (np.max(np.abs(I)) + _FLOOR[unit]))
+        qs.append(ctx.quantity(KIRCHHOFF, worst, "dimensionless"))
+        return qs
+
     @staticmethod
     def _ac_quantities(ctx, res) -> list:
         """A6.5: Y parameters over frequency in canonical SI, |h21|, and the scalars f_T and f_max when defined."""
@@ -171,6 +203,9 @@ class DeviceAdapter(Adapter):
         return qs
 
     def self_check(self, job, ctx, qs) -> List[str]:
+        if ctx.diagnostics.get("analysis") == "strike":        # A17.4: Kirchhoff is acceptance item R104, not a guard
+            bad = [q.name for q in qs if not np.all(np.isfinite(np.atleast_1d(np.asarray(q.array(), float))))]
+            return [f"{n}: non-finite values" for n in bad]
         cur = [q for q in qs if q.name.startswith("dc.I.")]
         if not cur:
             return ["no currents"]
@@ -189,7 +224,7 @@ class DeviceDevsim(DeviceAdapter):
     ENGINE = "devsim"
     manifest = Manifest(
         name="device.devsim", version="1.2", env="tcad", engine="devsim", engine_version="env-locked",
-        description="Any simws.spec Problem (equilibrium, DC sweep or small-signal) on the DEVSIM translator",
+        description="Any simws.spec Problem (equilibrium, DC sweep, small-signal or strike) on the DEVSIM translator",
         verification={"mesh": "paper fidelity: GCI per sweep point over 3 meshes (spacings x1, 1/sqrt2, 1/2)"},
         inputs=["problem"], outputs=_OUTPUTS, native_conventions=CUR, citations=["devsim"])
 
