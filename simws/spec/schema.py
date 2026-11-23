@@ -384,6 +384,41 @@ class SmallSignal(_M):
         return self
 
 
+class StrikeLoad(_M):
+    """A18.1: the struck contact on a supply through R, with C to ground, solved together with the device. The 1D
+    device stands for `area_um2`."""
+    contact: str
+    supply_V: float
+    R_ohm: float = Field(gt=0)
+    C_F: float = Field(default=0.0, ge=0)
+    area_um2: float = Field(gt=0)
+    supply_step_V: float = Field(default=0.1, gt=0)
+
+
+class GenerationProfile(_M):
+    """A19.1: relative pairs per unit depth, linear between points, zero outside."""
+    depth_um: List[float]
+    weight: List[float]
+
+    @model_validator(mode="after")
+    def _ok(self):
+        d, w = self.depth_um, self.weight
+        if not 2 <= len(d) <= 20000 or len(w) != len(d):
+            raise ValueError("profile: 2 to 20000 points, depth_um and weight of the same length")
+        if not (np.all(np.isfinite(d)) and np.all(np.isfinite(w))):
+            raise ValueError("profile: values must be finite")
+        if any(b <= a for a, b in zip(d, d[1:])):
+            raise ValueError("profile: depth_um must be strictly increasing")
+        if any(v < 0 for v in w) or not any(v > 0 for v in w):
+            raise ValueError("profile: weights must be >= 0 and not all 0")
+        return self
+
+    def at(self, x_um) -> np.ndarray:
+        x = np.asarray(x_um, float)
+        d, w = np.asarray(self.depth_um), np.asarray(self.weight)
+        return np.where((x < d[0]) | (x > d[-1]), 0.0, np.interp(x, d, w))
+
+
 class StrikeTransient(_M):
     """A particle strike as a generation pulse at a fixed bias (contract A17.1), 1D devices: `pairs_cm2` pairs per cm^2
     of device area generated uniformly over depth_um = (start, stop), in time a Gaussian (t_peak_s, sigma_s)
@@ -398,12 +433,29 @@ class StrikeTransient(_M):
     t_stop_s: float = Field(gt=0)
     steps_per_sigma: int = Field(default=10, ge=2, le=1000)
     points_per_decade: int = Field(default=20, ge=2, le=1000)
+    load: Optional[StrikeLoad] = None                  # A18.1
+    profile: Optional[GenerationProfile] = None        # A19.1
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler):
+        d = handler(self)
+        if isinstance(d, dict):                         # A18.1 / A19.1: no A17 id changes
+            for k in ("load", "profile"):
+                if d.get(k) is None:
+                    d.pop(k, None)
+        return d
 
     @model_validator(mode="after")
     def _ok(self):
         names = [b.contact for b in self.bias]
         if len(set(names)) != len(names):
             raise ValueError("strike: a contact may appear once in bias")
+        if self.load is not None and self.load.contact in names:
+            raise ValueError(f"strike: the load contact '{self.load.contact}' may not also be in bias")
+        if self.profile is not None:
+            ends = (self.profile.depth_um[0], self.profile.depth_um[-1])
+            if any(abs(a - b) > 1e-9 for a, b in zip(ends, self.depth_um)):
+                raise ValueError(f"strike: depth_um {tuple(self.depth_um)} must equal the profile's ends {ends}")
         if not self.depth_um[0] < self.depth_um[1]:
             raise ValueError("strike: depth_um must have start < stop")
         if self.t_peak_s < 4.0 * self.sigma_s * (1 - 1e-12):
@@ -473,7 +525,7 @@ class Problem(_M):
                 if n not in names:
                     raise ValueError(f"analysis: unknown contact '{n}'")
         if isinstance(a, StrikeTransient):
-            for n in [b.contact for b in a.bias]:
+            for n in [b.contact for b in a.bias] + ([a.load.contact] if a.load else []):
                 if n not in names:
                     raise ValueError(f"analysis: unknown contact '{n}'")
             ext = self.device.extent().x

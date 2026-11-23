@@ -169,6 +169,10 @@ class DeviceAdapter(Adapter):
                                    conventions=CUR))
         an = problem.analysis
         qs.append(ctx.quantity("tr.Q_generated", Q_E * an.pairs_cm2 * 1e4, qunit))
+        if an.load is not None and res.node_V:              # A18.3: the load contact's voltage
+            v = np.asarray(res.node_V, float)
+            qs.append(ctx.quantity(f"tr.V.{an.load.contact}", v.tolist(), "V", axes=axes))
+            qs.append(ctx.quantity(f"tr.V_min.{an.load.contact}", float(v.min()), "V"))
         I = np.array(I)
         worst = float(np.max(np.abs(I.sum(axis=0))) / (np.max(np.abs(I)) + _FLOOR[unit]))
         qs.append(ctx.quantity(KIRCHHOFF, worst, "dimensionless"))

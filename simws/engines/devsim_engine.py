@@ -279,10 +279,22 @@ def _build(problem: Problem) -> _State:
         from devsim import circuit_element
         for c in dev.contacts:
             circuit_element(name=_source(c.name), n1=_node(c.name), n2="0", value=0.0)
+    on_circuit = {c.name: circuit for c in dev.contacts}
+    ld = problem.analysis.load if isinstance(problem.analysis, StrikeTransient) else None
+    if ld is not None:                                       # A18.2: supply - R - node - C, scaled to the 1D area
+        from devsim import circuit_element
+        A = ld.area_um2 * UM * UM
+        # the supply and R as their Norton equivalent (supply_V / R into the node, R from the node to ground): the
+        # same node behaviour, and no source-current unknown, whose value (the leakage) stalls Newton in round-off
+        circuit_element(name=LOAD_SOURCE, n1=_node(ld.contact), n2="0", value=0.0)
+        circuit_element(name="R_load", n1=_node(ld.contact), n2="0", value=ld.R_ohm * A)
+        if ld.C_F > 0:
+            circuit_element(name="C_load", n1=_node(ld.contact), n2="0", value=ld.C_F / A)
+        on_circuit[ld.contact] = True
     extra = _strike_footprint(problem, region.name) if isinstance(problem.analysis, StrikeTransient) else None
     try:
         used = setup_region(DEVICE, region.name, load(region.material), net, tot, phys,
-                            {c.name: circuit for c in dev.contacts}, extra_generation=extra)
+                            on_circuit, extra_generation=extra)
     except RuntimeError as e:
         if _no_convergence(e):
             raise NotConverged(f"equilibrium solve at 0 V: {e}") from e
@@ -301,6 +313,7 @@ def _build(problem: Problem) -> _State:
     return _State(problem, used, region.name, opts, flags)
 
 
+LOAD_SOURCE = "I_load"                                   # A18.2 (Norton form of supply and R)
 STRIKE_RATE = "strike_rate"            # pairs/cm^3/s inside the segment, set at every time step (A17.2)
 STRIKE_FOOTPRINT = "StrikeFootprint"
 
@@ -315,6 +328,8 @@ def _strike_footprint(problem: Problem, region: str) -> str:
     a, b = an.depth_um
     on_end = np.isclose(x, a, rtol=0, atol=1e-9) | np.isclose(x, b, rtol=0, atol=1e-9)
     f = np.where(on_end, 0.5, np.where((x > a) & (x < b), 1.0, 0.0))
+    if an.profile is not None:                               # A19.1: the weight at each node, same end rule
+        f = f * an.profile.at(np.clip(x, a, b))
     total = float((f * vol).sum())
     if total <= 0:
         raise Unsupported("devsim", [f"strike: no mesh node in the segment {an.depth_um} um"])
@@ -423,21 +438,41 @@ STRIKE_FLAGS = ["strike:fixed_bias: the contacts are held at their bias; a circu
                 "strike:1d_column: the pairs are spread over the device area (no track radius, no 2D funnelling)"]
 
 
+MAX_STEP_SPLITS = 8
+RELAXED_REL_TOL = 1e-6
+MIXED_FLAG = ("strike:mixed_mode: the device and its load (supply, R, C) are solved together in one Newton "
+              "system")
+
+
 def _strike(problem: Problem, st: "_State", contacts: List[str], unit: str, diag: dict) -> EngineResult:
     """A17.2: ramp the biases, store the DC state for the transient, then backward Euler on the description's time
     points with the generation rate at the end of each step."""
     from devsim import set_parameter, solve
     from simws.hub.adapter import NotConverged
+    from devsim import get_circuit_node_value
+    from simws.tcad.solve import ramp_source
     an = problem.analysis
+    ld = an.load
     reached = "0 V"
     try:
+        if ld is not None:                                   # A18.2: power up through the load first
+            r_eff = ld.R_ohm * ld.area_um2 * UM * UM
+            ramp_source(LOAD_SOURCE, ld.supply_V / r_eff, start=0.0, step=ld.supply_step_V / r_eff,
+                        min_step=1e-4 * ld.supply_step_V / r_eff, **st.opts)
+            reached = f"supply = {ld.supply_V:g} V"
         for b in an.bias:
             st.ramp(b.contact, b.value_V, b.step_V)
             reached = f"{b.contact} = {b.value_V:g} V"
-    except RuntimeError as e:
-        if not _no_convergence(e):
+    except Exception as e:  # noqa: BLE001  (devsim raises devsim.error)
+        if not _no_convergence(e) and "stalled" not in str(e):
             raise
         raise NotConverged(f"strike bias: reached {reached}: {e}") from e
+
+    def node_v() -> float:
+        return float(get_circuit_node_value(node=_node(ld.contact), solution="dcop")) if ld is not None else 0.0
+
+    vnode = [node_v()] if ld is not None else []
+    opts = st.opts
     from devsim import get_contact_charge
 
     def charges() -> Dict[str, float]:
@@ -449,27 +484,61 @@ def _strike(problem: Problem, st: "_State", contacts: List[str], unit: str, diag
     q_prev = charges()
     times = [0.0]
     rate0 = an.pairs_cm2 / ((an.depth_um[1] - an.depth_um[0]) * UM)          # pairs/cm^3 per unit g
-    quad = 0.0
-    t_prev = 0.0
+    state = {"t": 0.0, "q": q_prev, "quad": 0.0, "splits": 0, "relaxed": 0}
+
+    def step(t1: float, level: int = 0) -> None:
+        """A18 / A19 defect fix (after the checker): backward Euler from state["t"] to t1; when Newton fails, DEVSIM
+        keeps the last converged state, so the step is halved (at most MAX_STEP_SPLITS times) and the substeps
+        are recorded as time points of their own, which keeps the backward charge sum exact."""
+        t0 = state["t"]
+        g = float(an.g(t1))
+        set_parameter(device=DEVICE, region=st.region, name=STRIKE_RATE, value=rate0 * g)
+        try:
+            try:
+                solve(type="transient_bdf1", tdelta=float(t1 - t0), charge_error=1e30, **opts)
+            except Exception as e:  # noqa: BLE001  (devsim raises devsim.error)
+                # Newton can stall in round-off just above the description's tolerance (the potential equation at
+                # 1e-8 to 1e-7 relative); the step is retried once at RELAXED_REL_TOL and counted
+                if not _no_convergence(e) or opts["relative_error"] >= RELAXED_REL_TOL:
+                    raise
+                solve(type="transient_bdf1", tdelta=float(t1 - t0), charge_error=1e30,
+                      **dict(opts, relative_error=RELAXED_REL_TOL))
+                state["relaxed"] += 1
+        except Exception as e:  # noqa: BLE001  (devsim raises devsim.error)
+            if not _no_convergence(e) or level >= MAX_STEP_SPLITS:
+                raise
+            state["splits"] += 1
+            tm = 0.5 * (t0 + t1)
+            step(tm, level + 1)
+            step(t1, level + 1)
+            return
+        state["quad"] += an.pairs_cm2 * g * (t1 - t0)
+        times.append(float(t1))
+        q_now = charges()
+        for k, v in st.currents().items():                 # A17.4: particle + displacement (backward)
+            part[k].append(v)
+            cur[k].append(v + (q_now[k] - state["q"][k]) / (t1 - t0))
+        state["q"] = q_now
+        if ld is not None:
+            vnode.append(node_v())
+        state["t"] = float(t1)
+
     try:
-        solve(type="transient_dc", **st.opts)
+        solve(type="transient_dc", **opts)
         for t in an.time_points_s():
-            g = float(an.g(t))
-            set_parameter(device=DEVICE, region=st.region, name=STRIKE_RATE, value=rate0 * g)
-            solve(type="transient_bdf1", tdelta=float(t - t_prev), charge_error=1e30, **st.opts)
-            quad += an.pairs_cm2 * g * (t - t_prev)
-            times.append(float(t))
-            q_now = charges()
-            for k, v in st.currents().items():                 # A17.4: particle + displacement (backward)
-                part[k].append(v)
-                cur[k].append(v + (q_now[k] - q_prev[k]) / (t - t_prev))
-            q_prev = q_now
-            t_prev = float(t)
-    except RuntimeError as e:
+            step(float(t))
+    except Exception as e:  # noqa: BLE001  (devsim raises devsim.error)
         if not _no_convergence(e):
             raise
-        raise NotConverged(f"strike transient: stopped after t = {t_prev:.4e} s: {e}") from e
-    diag = dict(diag, generated_pairs_quadrature_cm2=quad, n_time_points=len(times), particle_currents=part)
+        raise NotConverged(f"strike transient: stopped after t = {state['t']:.4e} s: {e}") from e
+    quad = state["quad"]
+    if state["splits"]:
+        st.flags.append(f"strike:step_split:{state['splits']}")
+    if state["relaxed"]:
+        st.flags.append(f"newton_rel_tol:{RELAXED_REL_TOL:g} at {state['relaxed']} transient steps")
+    diag = dict(diag, generated_pairs_quadrature_cm2=quad, n_time_points=len(times), particle_currents=part,
+                step_splits=state["splits"], relaxed_steps=state["relaxed"])
+    flags = list(st.flags) + ([MIXED_FLAG, STRIKE_FLAGS[1]] if ld is not None else STRIKE_FLAGS)
     return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="strike", sweep_contact=None,
-                        sweep_V=[], currents=cur, current_unit=unit, flags=list(st.flags) + STRIKE_FLAGS,
-                        diagnostics=_json(diag), time_s=times)
+                        sweep_V=[], currents=cur, current_unit=unit, flags=flags,
+                        diagnostics=_json(diag), time_s=times, node_V=vnode)

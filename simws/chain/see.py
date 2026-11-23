@@ -146,6 +146,7 @@ def upset_probability(see_result, qcrit: Dict[str, Any], pair_energy_eV: float =
     P_low = at(float(edep_eV(qcrit["q_hi_C"], pair_energy_eV)))
     P_high = at(float(edep_eV(qcrit["q_lo_C"], pair_energy_eV)))
     pp = (P * n + 1) / (n + 2)
+    flags += [f for f in qcrit.get("flags", []) if f == MEAN_PROFILE_FLAG]      # A19.3: the chain's result
     return {"P": P, "P_low": P_low, "P_high": P_high, "sigma": math.sqrt(pp * (1 - pp) / n), "E_crit_eV": e_c,
             "n_events": n, "flags": sorted(set(flags))}
 
@@ -274,3 +275,116 @@ def critical_charge_tcad(hub, problem, node: str, threshold_V: float, device_pro
             "device_result_ids": dev_ids, "collected_fraction": float(frac), "collected_at_qcrit_C": float(frac * qc),
             "node": node, "threshold_V": float(threshold_V), "polarity": polarity, "rerun": bool(rerun),
             "flags": [] if rerun else [LINEAR_FLAG]}
+
+
+# ------------------------------------------------------------------------------------------- A18: mixed mode
+def with_load(device_problem, contact: str, supply_V: float, R_ohm: float, C_F: float, area_m2: float,
+              supply_step_V: float = 0.1):
+    """A copy of a strike Problem whose `contact` hangs on supply_V through R_ohm with C_F to ground (A18.1); the
+    contact leaves the fixed biases."""
+    an = device_problem.analysis
+    if an.kind != "strike":
+        raise ValueError("with_load: the device problem needs a strike analysis")
+    d = device_problem.model_dump(mode="json")
+    d["analysis"]["bias"] = [b for b in d["analysis"]["bias"] if b["contact"] != contact]
+    d["analysis"]["load"] = {"contact": contact, "supply_V": float(supply_V), "R_ohm": float(R_ohm),
+                             "C_F": float(C_F), "area_um2": float(area_m2) * 1e12, "supply_step_V": supply_step_V}
+    return type(device_problem).model_validate(d)
+
+
+def critical_charge_mixed(hub, device_problem, threshold_V: float, area_m2: float, q_low_C: float,
+                          q_high_C: float, rel_tol: float = 1e-3, max_runs: int = 60) -> Dict[str, Any]:
+    """A18.4: the A10 bisection on the charge, each trial a mixed-mode device run; upset when the load contact's
+    tr.V_min is at or below threshold_V."""
+    ld = device_problem.analysis.load
+    if ld is None:
+        raise ValueError("critical_charge_mixed: the device problem needs a load (with_load)")
+    if not 0 < q_low_C < q_high_C:
+        raise ValueError("critical_charge_mixed: need 0 < q_low_C < q_high_C")
+    ids, vmin = [], {}
+
+    def upset(q: float) -> bool:
+        r = hub.submit("device.devsim", params={"problem": strike_problem(device_problem, q, area_m2)})
+        if r.status != "ok":
+            raise RuntimeError(f"critical_charge_mixed: device job for {q:.4e} C: {r.status}: {r.message}")
+        ids.append(r.id)
+        vmin[q] = float(hub.result(r.id).q(f"tr.V_min.{ld.contact}").value)
+        return vmin[q] <= threshold_V
+
+    lo, hi = float(q_low_C), float(q_high_C)
+    if upset(lo):
+        raise ValueError(f"critical_charge_mixed: q_low_C = {lo:.4e} C already upsets the node; lower it")
+    if not upset(hi):
+        raise ValueError(f"critical_charge_mixed: q_high_C = {hi:.4e} C does not upset the node; raise it")
+    while (hi - lo) / hi > rel_tol:
+        if len(ids) >= max_runs:
+            raise RuntimeError(f"critical_charge_mixed: {max_runs} runs without reaching rel_tol {rel_tol:g}")
+        mid = 0.5 * (lo + hi)
+        if upset(mid):
+            hi = mid
+        else:
+            lo = mid
+    from simws.hub.trust import assess_stored
+    try:
+        trust = assess_stored(hub, ids[-1]).level
+    except Exception:  # noqa: BLE001  (a hub without a comparison graph, e.g. a stand-in)
+        trust = None
+    flags = ["strike:mixed_mode"] + ([MEAN_PROFILE_FLAG] if device_problem.analysis.profile is not None else [])
+    return {"qcrit_C": 0.5 * (lo + hi), "q_lo_C": lo, "q_hi_C": hi, "runs": len(ids), "result_ids": ids,
+            "device_result_ids": ids, "v_min_at_q_hi_V": vmin[hi], "v_min_at_q_lo_V": vmin[lo],
+            "node": ld.contact, "threshold_V": float(threshold_V), "polarity": "discharge",
+            "device_trust": trust, "flags": flags}
+
+
+# ------------------------------------------------------------------------------- A19: the G4SEE depth profile
+MEAN_PROFILE_FLAG = ("strike:mean_profile: every event's deposit takes the mean depth shape from G4SEE; its size "
+                     "comes from the spectrum")
+
+
+def deposit_profile(hub, see_problem, edges_um) -> Dict[str, Any]:
+    """A19.2: one G4SEE run per slice [e_k, e_k+1] (the SV moved to that depth and thickness, all else unchanged).
+    Returns the slice centres (um), see.edep_mean per slice (MeV) and its uncertainty, the mean deposit per um,
+    and the result ids."""
+    e = np.asarray(edges_um, float)
+    if e.ndim != 1 or e.size < 2 or np.any(np.diff(e) <= 0) or e[0] < 0:
+        raise ValueError("deposit_profile: edges_um must be increasing, >= 0, at least 2 values")
+    means, sig, ids = [], [], []
+    for a, b in zip(e[:-1], e[1:]):
+        p = see_problem.with_changes({"geometry.sv_depth_um": float(f"{a:.12g}"),
+                                      "geometry.sv_thickness_um": float(f"{b - a:.12g}")})
+        r = hub.submit("see.g4see", params={"problem": p})
+        if r.status != "ok":
+            raise RuntimeError(f"deposit_profile: slice {a:g}-{b:g} um: {r.status}: {r.message}")
+        q = hub.result(r.id).q("see.edep_mean")
+        means.append(float(q.value) / 1e6)
+        sg = getattr(q.uncertainty, "sigma", None)
+        sig.append(float(sg) / 1e6 if sg is not None else float("nan"))
+        ids.append(r.id)
+    m, s = np.asarray(means), np.asarray(sig)
+    w = np.diff(e)
+    return {"edges_um": e.tolist(), "centres_um": (0.5 * (e[:-1] + e[1:])).tolist(), "edep_mean_MeV": m.tolist(),
+            "edep_sigma_MeV": s.tolist(), "MeV_per_um": (m / w).tolist(), "total_MeV": float(m.sum()),
+            "total_sigma_MeV": float(np.sqrt(np.nansum(s ** 2))), "result_ids": ids}
+
+
+def profile_from_deposit(dp: Dict[str, Any]):
+    """A19.2: a GenerationProfile with weights = mean MeV per um at the slice centres, extended flat to the outer
+    edges."""
+    from simws.spec.schema import GenerationProfile
+    c = list(dp["centres_um"])
+    w = list(dp["MeV_per_um"])
+    e = dp["edges_um"]
+    depth = [float(e[0])] + c + [float(e[-1])]
+    weight = [w[0]] + w + [w[-1]]
+    return GenerationProfile(depth_um=depth, weight=[max(0.0, float(v)) for v in weight])
+
+
+def strike_from_see(device_problem, profile):
+    """A19.3: the strike's generation follows `profile` over its own depth range."""
+    if device_problem.analysis.kind != "strike":
+        raise ValueError("strike_from_see: the device problem needs a strike analysis")
+    d = device_problem.model_dump(mode="json")
+    pr = profile.model_dump(mode="json") if hasattr(profile, "model_dump") else profile
+    d["analysis"]["profile"] = pr
+    d["analysis"]["depth_um"] = [pr["depth_um"][0], pr["depth_um"][-1]]
+    return type(device_problem).model_validate(d)

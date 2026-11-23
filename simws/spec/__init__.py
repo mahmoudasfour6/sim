@@ -8,7 +8,7 @@ from simws.spec.see import (BeolLayer, EdepHistogram, SeeGeometry, SeePhysics, S
                              SeeStatistics)
 from simws.spec.schema import (SPEC_VERSION, Analysis, Bias, Box, Contact, DCSweep, DeviceSpec, DopingTerm, Equilibrium,
                                GradeTerm, MeshHints, ModelSpec, Numerics, Problem, ProfileTerm, Region, SmallSignal,
-                               StrikeTransient, Track)
+                               StrikeTransient, StrikeLoad, GenerationProfile, Track)
 
 
 def family(problem) -> str:
@@ -30,4 +30,5 @@ __all__ = ["SPEC_VERSION", "Analysis", "Bias", "Box", "Contact", "DCSweep", "Dev
            "BeolLayer", "EdepHistogram", "SeeGeometry", "SeePhysics", "SeeProblem", "SeeSource", "SeeStatistics",
            "AcSweep", "CircuitNumerics", "CircuitProblem", "DcSweep", "Element", "Library", "Model", "Op", "Pulse",
            "Pwl", "Transient", "VerilogA", "AnnealModels", "AnnealNumerics", "AnnealProblem", "AnnealStep",
-           "DepthProfile", "ProfileTerm", "StrikeTransient", "family"]
+           "DepthProfile", "ProfileTerm", "StrikeTransient", "StrikeLoad", "GenerationProfile",
+           "family"]

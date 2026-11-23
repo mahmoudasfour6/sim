@@ -43,6 +43,7 @@ class EngineResult(BaseModel):
     y_imag: Dict[str, List[float]] = {}
     y_unit: Optional[Literal["S/cm**2", "S/cm"]] = None    # 1D: per cm^2 of cross-section; 2D: per cm of depth
     time_s: List[float] = []                       # strike only (A17.4): the time points, the first one t = 0
+    node_V: List[float] = []                       # strike with a load (A18.3): the load contact's voltage
 
 
 def _fmt(v: Any) -> str:

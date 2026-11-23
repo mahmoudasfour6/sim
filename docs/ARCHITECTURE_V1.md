@@ -2305,3 +2305,138 @@ Until now (A10) the critical charge used Messenger's double exponential with tim
    1 nm), (5 um, 20 nm), so the spacing grades from 1 nm to 20 nm between 1 and 5 um; the geometric tail has
    ceil(decades x points_per_decade) points; with t_peak = 4 sigma the 10 geometric head points are absent;
    `critical_charge_tcad` returns the A10 fields except the Messenger time constants.
+
+### A16 and A17, laptop run (23 Nov 2026)
+
+Update 11 on the owner's laptop, committed as 30aec7a on arch/v1; master in ~/sim_workspace fast-forwarded to it.
+FiPy 3.4.5 installed into the tcad env by the update. Fast tests 1809 passed, 13 skipped, 7 xfailed. Anneal
+acceptance 180 passed, 4 skipped (the checks that re-read the source PDFs). Strike acceptance 57 passed, 1 xfailed
+(R103's peak ratio, A17.10). Every gated R90 to R105 number and both demo tables are identical to the build
+machine's: R90a 0.2168 %, R91 0.0918 %, R99 junctions 431.38 / 431.39 nm, R100 0.999982, R103 ratio 9.61544, the
+100 kOhm critical charges 0.754 / 12.294 / 0.646 fC.
+
+### A18 (23 Nov 2026, lead): mixed mode, the strike with the circuit node solved together with the device
+
+The owner chose "mixed mode" and "G4SEE track -> TCAD" (A19) as the next two steps. A17 held the struck contact at
+a fixed bias; at 10 kOhm / 1 fF that decided the answer (no upset with the TCAD pulse, 1.4 fC with Messenger's).
+
+0. **What the lead had seen.** The legacy `simws/tcad/mixed_mode.py` (DEVSIM circuit elements on a contact,
+   elements scaled per unit depth, fully coupled Newton; its `rc_check` matched the analytic RC exponential); the
+   v1 DEVSIM engine's circuit contacts (A6.4) and `ramp_source`; A17's strike path and results. No mixed-mode run on
+   the v1 path when items 0 to 8 were committed.
+1. **Description.** `StrikeTransient.load` (optional, left out of the serialised description when absent, so no
+   A17 id changes): `contact`, `supply_V`, `R_ohm` (> 0), `C_F` (>= 0), `area_um2` (> 0, the area the 1D device
+   stands for), `supply_step_V` (default 0.1). The circuit: a source supply_V from node "vdd" to ground, R from
+   "vdd" to the contact, C from the contact to ground. The load contact may not be in `bias` (other contacts keep
+   their fixed bias).
+2. **Engine (DEVSIM).** The load contact is a circuit contact; the elements are scaled to the 1D device's per-cm^2
+   currents: R_eff = R A, C_eff = C / A (A in cm^2). The supply is ramped from 0 (steps of supply_step_V, halved on
+   failure), then the fixed biases, then the transient of A17 unchanged. The node voltage is read from DEVSIM's
+   circuit solution after every step.
+3. **Result.** `EngineResult.node_V` (the load contact's voltage at every time point; empty without a load).
+   Adapter: `tr.V.<contact>` (V on the axis "time") and `tr.V_min.<contact>` (V). The flag `strike:fixed_bias` is
+   replaced by `strike:mixed_mode: the device and its load (supply, R, C) are solved together in one Newton
+   system`; `strike:1d_column` stays.
+4. **Chain** (`simws/chain/see.py`): `with_load(device_problem, contact, supply_V, R_ohm, C_F, area_m2)`;
+   `critical_charge_mixed(hub, device_problem, threshold_V, area_m2, q_low_C, q_high_C, rel_tol=1e-3)`: the A10
+   bisection, each trial a device run at that charge; upset when tr.V_min of the load contact is at or below the
+   threshold; returns the A10 fields (no Messenger time constants), the device result ids and v_min at q_crit.
+5. **Acceptance (tolerances fixed here, before any mixed-mode run).** The reference device of A17.6 with the top
+   contact on a load (supply 1 V, area 1 um^2); its fixed biases empty.
+   R110 (Kirchhoff at the node): R 10 kOhm, C 1 fF, pairs 1e11: at every time point k >= 1,
+   |(V_s - v_k)/R - C (v_k - v_{k-1})/(t_k - t_{k-1}) - I_k A| <= 1e-3 x max_k |I_k A|, with I the reported
+   tr.I.top (current into the device).
+   R111 (the fixed-bias limit): R 10 kOhm, C 1 fF, pairs 1e9 (the node moves by about 0.2 % of the supply):
+   tr.Q.top within 1 % of the A17 fixed-bias run of the same device at top = +1 V, and the peak current within 2 %.
+   R112 (collection): R 100 kOhm, C 1 fF, pairs 1e11: tr.Q.top / tr.Q_generated within 1 % of 1.
+   R113 (convergence): R 100 kOhm, C 1 fF, pairs 5e11: the dip V_s - V_min with steps_per_sigma 20 and
+   points_per_decade 40, and with mesh scale 0.5, within 1 % of the default's.
+   R114 (DC point): with no deposit to speak of (pairs 1e6), v at t = 0 equals V_s - I_0 A R within 1e-6 V
+   (I_0 the reported current at t = 0).
+   R115 (reported): q_crit mixed for the node of A17 R106 (10 kOhm, 1 fF) and for 100 kOhm / 1 fF, next to A17's
+   fixed-bias TCAD (rerun) and Messenger (1 ps, 10 ps); v_min at q_crit.
+   R116 (refusals and ids): the load contact also in bias, a load on an unknown contact ("analysis:"), a 2D device
+   ("strike:"), Charon and devsim_eb ("analyses:"); `reference_strike_diode()` keeps its A17 id
+   ff0714fb4325f7f403ef4969c97f233b (computed by the lead on the A17 code before this amendment).
+6. **Trust.** One engine: "unverified". R111 ties the mixed-mode path to A17's fixed-bias path where they must
+   agree; there is no second code.
+7. **Not in A18.** Loads other than supply-R-C on one contact; transistors; 2D mixed mode.
+7a. **A18 clarification by the lead (23 Nov, during development, before the checker).** Item 2's supply and R are
+   built as their Norton equivalent: a current source supply_V / R into the contact and R from the contact to
+   ground. For the node this is the same circuit (the same v(t), the same currents in the device and in C; the
+   current "in R" of R110 is (V_s - v)/R either way). Built literally, the voltage source's current unknown is the
+   leakage (about 1e-16 A here) and Newton stalled on it at 1e-9 to 1e-6 relative in round-off; in the Norton form
+   the only circuit unknown is the node voltage and the coupled solves reach the description's 1e-10. The ramp of
+   item 2 ramps that current in steps of supply_step_V / R.
+8. **After the checker's report (23 Nov).** 41 tests written from A18 (tests/v1/test_mixed_mode.py); 39 passed and
+   2 failed at first.
+   **Results:** R110 worst residual 6.9e-10 of the peak (limit 1e-3); R111 tr.Q.top 1.1e-4 (1 %); R112 0.999977
+   (1 %); R113 mesh 3.7e-5 (1 %); R114 3.7e-12 V and 3.7e-11 V (1e-6 V); R116 as stated, the A17 id kept; trust
+   "unverified". R115: 10 kOhm / 1 fF, no upset in mixed mode up to 100 fC (v_min 0.5915 V at 100 fC, 78 %
+   collected); 100 kOhm / 1 fF, q_crit 0.9136 fC in mixed mode against 0.7537 fC (fixed-bias TCAD pulse) and
+   0.6461 fC (Messenger).
+   **Recorded FAIL, R111 (peak):** the mixed-mode peak is 5.5 % below the fixed-bias one (limit 2 %) while the
+   node moves by 0.04 % and the charge agrees to 1e-4. With the node free, part of the fast current is supplied by
+   the device's own junction capacitance (about 0.2 fF here, against C = 1 fF) and never reaches the external
+   circuit; stiffening the node closes the gap (10 Ohm: 7.6e-5; 100 fF: 1.0e-3; C = 0: 7.3e-2). The gate's premise
+   (a 0.04 % voltage change means a fixed-bias peak) was the lead's error. Gate kept; strict xfail.
+   **Recorded FAIL, R113 (time steps):** the dip with steps_per_sigma 20 and points_per_decade 40 is 1.27 % larger
+   than with the defaults (limit 1 %); with 40 / 80 about 2 %. The minimum falls in the geometric tail (63 ps),
+   and the tail's points per decade drive the error. Mixed-mode dips and q_crit therefore carry a time-step error
+   of about 2 % at the defaults, in no budget. Gate kept; strict xfail.
+   **Clarified:** item 4's "v_min at q_crit" is returned at the two bracket ends (`v_min_at_q_lo_V`,
+   `v_min_at_q_hi_V`); q_crit itself is not run. `C_F` defaults to 0 (no capacitor).
+   **Fixed after A19's checker (see A19.7):** DEVSIM's error type and the transient retry, which apply here too.
+
+### A19 (23 Nov 2026, lead): the G4SEE deposit's depth profile as the TCAD generation, and the upset probability
+
+1. **Description.** `StrikeTransient.profile` (optional, left out when absent): `depth_um` (strictly increasing)
+   and `weight` (>= 0, not all 0; relative pairs per unit depth, linear between points, zero outside); with a
+   profile, `depth_um` of the strike must equal (first, last) of the profile. The footprint of A17.2 becomes the
+   weight at each node (with the 1/2 rule at the ends), scaled so its node-volume integral equals stop - start:
+   pairs_cm2 stays exact.
+2. **Depth profile from G4SEE** (`simws/chain/see.py`, `deposit_profile(hub, see_problem, edges_um)`): one G4SEE run
+   per slice [e_k, e_k+1] (the SV of the given problem moved to that depth and thickness, everything else
+   unchanged); returns the slice centres, `see.edep_mean` per slice and its uncertainty, and the mean deposit
+   per micrometre. `profile_from_deposit(...)` turns it into a GenerationProfile (weights = mean MeV per um at
+   the slice centres, extended flat to the slice edges at both ends).
+3. **Chain.** `strike_from_see(device_problem, profile)`: the strike's generation follows the profile;
+   `upset_probability(see_result, qcrit)` (A10, unchanged) with q_crit from `critical_charge_mixed` run on that
+   device: every event's deposit is taken with the mean depth shape (flag `strike:mean_profile` on the chain's
+   result), its size from G4SEE's spectrum in the SV covering the whole profile.
+4. **Acceptance (tolerances fixed here, before any run of this amendment).**
+   R120 (slices add up): proton 5 MeV, normal incidence, bulk 20 um wide and 50 um thick, SV 1 um x 1 um laterally,
+   5 slices of 1 um from 0 to 5 um, 20 000 events each, and one run with the SV 0 to 5 um: the sum of the slice
+   means within 4 combined standard errors of the 0 to 5 um mean.
+   R121 (against NIST, as A8.7): alpha 5.0 MeV, the same geometry with a 10 um wide SV, slices of 1 um from 0 to
+   10 um: each slice mean within 3 % of the CSDA deposit of `simws.radiation.nist_star` for that slice.
+   R122 (a profile in TCAD): (a) a flat profile over A17's segment reproduces the A17 uniform run (tr.Q.top and
+   every tr.I.top value within 1e-9 relative); (b) a linear profile (weight 1 at 0.25 um, 3 at 0.6 um): the
+   quadrature of generated pairs within 1e-3 of pairs_cm2 and tr.Q.top / tr.Q_generated within 1 % of 1.
+   R123 (refusals): a profile whose ends differ from depth_um, an all-zero weight, decreasing depths.
+   R124 (chain, reported): proton 5 MeV (and 2 MeV) on the reference device of A18.5 at 1 um^2, R 100 kOhm, C 1 fF:
+   the G4SEE profile over 0 to 5 um in 0.5 um slices, q_crit mixed with that profile, the upset probability per
+   proton with it, and with A10's Messenger q_crit (1 ps, 10 ps) on the same node, 20 000 events.
+5. **Trust.** The deposit side keeps G4SEE's standing (A8, checked against NIST); the device side is A18's
+   ("unverified"). The chain's result carries both.
+6. **Not in A19.** Per-event depth shapes (each event takes the mean shape), lateral spread of the track, tilted
+   tracks in the device (the 1D column is normal incidence).
+7. **After the checker's report (23 Nov).** 33 tests written from A19 (tests/v1/test_see_profile.py); 30 passed and
+   3 failed at first. Histograms chosen by the checker: protons 0 to 1 MeV, alphas 0 to 5.25 MeV, 20 000 bins; no
+   overflow in any run.
+   **Results:** R120 slice sum 0.067262 MeV against 0.067071 +- 0.000071 MeV, 1.86 combined sigma (limit 4);
+   R121 worst slice -0.45 % against NIST (3 %); R122a identical to A17's uniform run (0 difference); R122b
+   quadrature 8.9e-7 (1e-3), Q_top / Q_gen 0.999973 (1 %); R123 refusals as stated.
+   **Two defects, found by the checker and fixed.** (1) R124 stopped on "Convergence failure!" at one trial charge
+   (5 MeV, 2.3082e12 pairs/cm^2). DEVSIM raises its own error type, which the strike path caught only as
+   RuntimeError (so the failure escaped as an engine error rather than "not converged", on the A17 path as well),
+   and the transient had no retry (A18.2 named none). Newton stalled on the potential equation at about 1e-7
+   relative near the end of the pulse. Now a failed step is retried once at relative 1e-6 (flag
+   `newton_rel_tol:1e-06 at N transient steps`, count in the diagnostics `relaxed_steps`), then halved up to 8
+   times (flag `strike:step_split:N`; substeps are recorded as time points, so the backward charge sum stays
+   exact). The failing case now runs, with one relaxed step. (2) The flag `strike:mean_profile` of item 3 was on
+   no result: `critical_charge_mixed` now adds it when the device has a profile, `upset_probability` carries it
+   from that q_crit, and the q_crit result gives `device_trust`.
+   **R124 (reported; the checker's run before the fix, with q_high 50 fC):** proton 5 MeV, mean 0.06707 MeV in
+   0-5 um, q_crit 3.6886 fC (E_crit 84.3 keV), P per proton 0.0505 +- 0.0016; proton 2 MeV, q_crit 3.7069 fC,
+   P 0.9994. With Messenger's q_crit (0.6461 fC, E_crit 14.8 keV), P = 1 for both.
