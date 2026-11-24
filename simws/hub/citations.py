@@ -64,6 +64,10 @@ REGISTRY: Dict[str, dict] = {
                  title="FiPy: Partial Differential Equations with Python",
                  journal="Computing in Science \\& Engineering", volume="11", number="3", pages="6--15", year="2009",
                  doi="10.1109/MCSE.2009.52", checked=True),
+    "ghante1995": dict(type="inproceedings", author="V. Ghante and L. M. Lam and S. Morris and S.-H. Yang and A. F. Tasch and D. Kamenitsa and J. Sheng and C. Magee",
+                       title="The detailed dependence of implanted phosphorus profiles in (100) single-crystal Si on key "
+                             "implant parameters", booktitle="MRS Symposium Proceedings", volume="396", pages="715",
+                       year="1995", doi="10.1557/PROC-396-715", checked=True),
     "holmstrom2008": dict(type="article", author="E. Holmstrom and A. Kuronen and K. Nordlund",
                           title="Threshold defect production in silicon determined by density functional theory "
                                 "molecular dynamics simulations",

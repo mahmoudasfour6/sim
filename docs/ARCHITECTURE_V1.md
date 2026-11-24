@@ -2440,3 +2440,203 @@ a fixed bias; at 10 kOhm / 1 fF that decided the answer (no upset with the TCAD 
    **R124 (reported; the checker's run before the fix, with q_high 50 fC):** proton 5 MeV, mean 0.06707 MeV in
    0-5 um, q_crit 3.6886 fC (E_crit 84.3 keV), P per proton 0.0505 +- 0.0016; proton 2 MeV, q_crit 3.7069 fC,
    P 0.9994. With Messenger's q_crit (0.6461 fC, E_crit 14.8 keV), P = 1 for both.
+
+### A18 and A19, laptop run (24 Nov 2026)
+
+Update 12 on the owner's laptop, committed as 304a0e9 on arch/v1; master in ~/sim_workspace fast-forwarded.
+Fast tests 1880 passed, 13 skipped, 9 xfailed (35 min). Mixed-mode acceptance 41 passed, 2 xfailed (R111 peak,
+R113 time, as recorded); G4SEE-profile acceptance 33 passed. Identical to the build machine: R110 to R113 dips,
+R115 (0.9136 / 0.7537 / 0.6461 fC at 100 kOhm), R120, R121, R122, R124 (5 MeV: q_crit 3.6874 fC, P 0.0508;
+2 MeV: 3.7057 fC, P 0.9994). One difference, all within the gates: the leakage at t = 0 with 10 kOhm is
+round-off on both machines (laptop I_0 A = -3.4e-15 A, here +4.2e-16 A), and tr.Q subtracts it over 1 us, so
+R111's charge differs by 2.3e-3 on the laptop (1.1e-4 here; limit 1e-2) and R114 at 10 kOhm by 3.5e-11 V (limit
+1e-6 V). At small deposits (1e9 pairs/cm^2, about 1.6 aC per um^2) tr.Q therefore carries about 0.2 % from the
+leakage's round-off.
+
+### A20 (24 Nov 2026, lead): the crystal (channeling) implant in the process chain
+
+The owner asked for the next three items: the channeling profiles in the chain (A20), phosphorus channeling from
+Ghante et al. 1995 (A21), and implant damage in the anneal (A22).
+
+0. **What the lead had seen.** A15 (the channeling engine: implant.concentration with a digitisation sigma per bin,
+   normalised over [0, inf), refused when the target cuts off more than 1e-4), A16 (`initial_from_implant`, the
+   anneal, `diode_from_anneal`) and their results. No crystal profile had been annealed when this was committed.
+1. **Chain.** `initial_from_implant(result, dose_cm2=None, band=0)`: `band` +1 or -1 takes the concentration plus
+   or minus its reported sigma at every point (clipped at 0): the digitisation envelope, not a 1-sigma profile (the
+   reading errors are correlated along the profile). Nothing else changes: a channeling result goes through the
+   A16 chain as an implant result.
+2. **Acceptance (tolerances fixed here, before any run).**
+   R130 (dose): B 35 keV, 1e14, tilt 7, rotation 30, crystal, target 1.5 um, depth bins 2 nm; As 120 keV, 1e13,
+   tilt 7, rotation 22, crystal, target 1.0 um: the dose of `initial_from_implant` within 0.5 % of the beam dose.
+   R131 (the two anneal engines on a crystal profile): each of R130's profiles annealed "fermi", B on n-type 1e16 at
+   1000 C 1800 s, As on p-type 1e16 at 1000 C 600 s, thickness 2 um: junction depths of devsim_anneal and fipy
+   within 1 % (A16.8).
+   R132 (channeling deepens the junction): the same anneals from the amorphous RustBCA profile of the same beam
+   (boron in "empirical" stopping, as A15's demo): the crystal junction deeper than the amorphous one, for both
+   ions, on both engines.
+   R133 (reported): junction depths from band -1, 0, +1 (devsim_anneal); the DEVSIM diode of the crystal B profile:
+   J(0.6 V) and the Shockley fit, next to the amorphous one.
+3. **Trust.** The anneal result is "verified" when the two engines agree (A16.8); the starting profile is A15's,
+   "unverified" by rule. Each keeps its own level; the chain reports both.
+
+### A21 (24 Nov 2026, lead): phosphorus channeling from the SIMS of Ghante et al. 1995 (our own fit)
+
+0. **What the lead had seen.** V. Ghante, L. M. Lam, S. Morris, S.-H. Yang, A. F. Tasch et al., "The detailed dependence of
+   implanted phosphorus profiles in (100) single-crystal Si on key implant parameters", MRS Symp. Proc. 396, 715
+   (1995), DOI 10.1557/PROC-396-715, supplied by the owner (scan, 400 dpi, bitonal): SIMS only, no fitted
+   parameters; the authors give the SIMS accuracy as better than 50 % in concentration and 10 % in depth; tilt
+   angles corrected for the wafers' miscut. Figure 1 (15, 30, 50, 80, 120, 180 keV; 1e14; tilt 4, rotation 22),
+   Figure 2 (50 keV; 1e13, 1e14, 5e14, 2e15, 8e15; tilt 10, rotation 0), Figures 3 to 6 (tilt and rotation series).
+   The lead traced Figures 1 and 2 (a slope-continuity tracer, every trace checked on an overlay; tools/digitise
+   to be committed with the data) and saw, while reading, that each trace integrates to its nominal dose within
+   6 % (Figure 1: 0.94 to 1.01 x 1e14) and 2 % (Figure 2): the SIMS were normalised to the dose, and the reading
+   holds. That is recorded here, not gated. No model had been fitted when items 0 to 7 were committed.
+1. **Data** (`simws/data/channeling/ghante1995_phosphorus.json`): the traced points (depth um, cm^-3) of Figure 1,
+   Figure 2, Figure 3 (the 10 deg curve: 30 keV, 1e14, tilt 10, rotation 0), Figure 6 (the 0 deg curve: 120 keV,
+   1e14, tilt 10, rotation 0) and Figure 5 (the 0 deg curve: 50 keV, 5e14, tilt 10, rotation 0), the pixel
+   calibration, the PDF's SHA-256. Points below the curve's noise floor (Figure 1: 2e17; Figures 2, 3, 5, 6: the
+   floor named in the file per curve) are kept but not fitted.
+2. **Model.** The form of A15's arsenic model (Suzuki 2000): (1 - f) n_a + f n_c, n_a a joined half Gaussian (Rpm,
+   dRp1, dRp2), n_c the same with the tail exp(-((x - Rpm)/L)^alpha) beyond Rpm + dRp2, each normalised on
+   [0, inf). The six parameters are fitted by the lead to each traced curve (least squares in log10 C over the
+   points above the floor) and stored in the data file with the fit's residuals. Two conditions, and nothing
+   between them: (A) tilt 4, rotation 22, dose 1e14, 15 to 180 keV (Figure 1), the parameters linear in energy;
+   (B) tilt 10, rotation 0: at 50 keV the doses 1e13 to 8e15 (Figure 2), the parameters linear in log10 dose; at
+   1e14 the energies 30, 50, 120 keV (Figures 3, 2, 6), linear in energy. In (B) a dose other than 1e14 is taken
+   only at 50 keV. Every result carries `implant:own_fit: simws's fit to the SIMS of Ghante et al. 1995 (not a
+   published model)` and `budget:sims_accuracy: the SIMS are good to 50 % in concentration and 10 % in depth`.
+3. **Engine.** The channeling engine (A15) gains phosphorus (31P) under these two conditions (angles within 0.5
+   deg). The uncertainty (A15.5's convention): every length moved by -/+ 10 % (the SIMS depth accuracy); the
+   reported sigma is half the spread.
+4. **Acceptance (tolerances fixed here, before any fit).**
+   R140 (fit): every fitted curve within a factor 1.5 of its traced points above the floor at 95 % of them, and
+   the depth where it falls to 1e18 cm^-3 within 10 % of the traced depth.
+   R141 (energy, leave one out, A): the parameters at 50, 80 and 120 keV interpolated from their neighbours only
+   (30 / 80, 50 / 120, 80 / 180): peak concentration within a factor 1.5, depth at 1e18 within 15 %.
+   R142 (dose, leave one out, B at 50 keV): 5e14 from 1e14 / 2e15 and 2e15 from 5e14 / 8e15 (in log10 dose): the
+   same limits as R141.
+   R143 (the replicate): the model at (B) 50 keV, 5e14 against Figure 5's 0 deg curve (not fitted): peak within a
+   factor 1.5, the depths at 1e18 and at 3e17 within 10 %.
+   R144 (engine): normalisation and the A15 rules (thin target, refusals with "energy:", "dose:", "angles:");
+   phosphorus outside both conditions refused.
+   R145 (chain, reported): P 50 keV 1e14, condition (B), into p-type 1e16, 1000 C 600 s "fermi" on both anneal
+   engines (junctions within 1 %), next to amorphous RustBCA.
+5. **Trust.** "Unverified": one source, and Figure 5's curve is from the same study (R143 checks the reading and
+   the fit, not the physics).
+6. **Not in A21.** Other tilts and rotations (Figures 3 to 6 are checks only), doses away from 1e14 except at 50 keV
+   in (B), 7 deg tilt.
+7. **Corrections by the lead before any acceptance number (24 Nov).** (a) The first authors' initials were wrong in
+   item 0: V. Ghante, L. M. Lam, S. Morris, S.-H. Yang, A. F. Tasch, D. Kamenitsa, J. Sheng, C. Magee.
+8. (b) **The model has one component, not two (item 2 changed).** Fitting the six parameters of item 2 to each curve
+   gave f = 1 (the upper bound) for 9 of the 13 curves and f between 0.19 and 0.86 for the others, with L and
+   alpha trading against f: f is not determined by a single curve, and its jumps from curve to curve would make
+   the interpolation of item 2 arbitrary. The fitted form is therefore Suzuki's n_c alone (the joined half
+   Gaussian with the tail beyond Rpm + dRp2, kappa-joined), five parameters, normalised on [0, inf). Fit quality
+   seen while deciding (the R140 quantity, before R141 to R143 were computed): rms of log10(model / trace) 0.014
+   to 0.065, and 97.4 % to 100 % of the points within a factor 1.5. With one component there is no channeled
+   share to report; `implant.channeled_fraction` for phosphorus is the share of the profile deeper than
+   Rpm + 2 dRp2 (information only). Condition (B)'s energy set at 1e14 uses Figure 2's 1e14 curve at 50 keV.
+   L and alpha still trade against each other between energies (L from 5 to 75 nm, alpha from 0.38 to 0.90);
+   R141 and R142 test what that does to interpolation.
+9. **After the checker's report (24 Nov).** 179 tests written from A20 and A21 (tests/v1/test_crystal_chain.py,
+   tests/v1/test_phosphorus_channeling.py); 176 passed and 3 failed at first, all three from one defect.
+   **Defect, found by the checker and fixed:** condition (A) was not normalised on [0, inf) at 30, 120 and 180 keV
+   (the integral was 1 + 2.9e-4, 4.1e-4, 2.6e-4; limit 1e-4): the normalisation grid stopped at Rpm + 60 max(L,
+   dRp2), but with alpha 0.38 to 0.47 and L 5 to 14 nm the tail carries 3e-4 beyond it. The grid now reaches Rpm +
+   L 80^(1/alpha) (geometric beyond the core), as does the information-only tail share. Also fixed: phosphorus
+   results carried A15's `implant:published_fit` flag next to `implant:own_fit` (now only the own-fit and SIMS
+   flags; the conditions are in the diagnostics); condition (B) took doses other than 1e14 within 0.5 keV of 50
+   keV, against "only at 50 keV" (now within 1e-6 keV); the adapter's description of channeled_fraction now says
+   what it is for phosphorus. A15's R87 test expected "ion:" for phosphorus; since A21 it is "angles:" (amended).
+   **Results:** A20: R130 B +0.0008 %, As -0.0020 % (0.5 %); R131 0.0013 % and 0.0007 % (1 %); R132 crystal deeper
+   for both ions on both engines (B 490.8 against 431.3 nm, As 326.3 against 179.9 nm); R133 bands B 489.8 / 490.8 /
+   491.7 nm, As 318.7 / 326.3 / 333.8 nm, diodes J(0.6 V) 1.0986e4 against 1.1000e4 A/m^2. A21: R140 at least 97.4 %
+   of points within a factor 1.5 (95 %), depths at 1e18 within 2.8 % (10 %); R141 peaks 0.955 to 1.035, depths
+   within 2.5 % (15 %); R142 5e14: peak 0.932, depth +14.2 % (15 %: close), 2e15: 0.990, +9.6 %; R143 peak 0.952,
+   depths +2.8 % and +2.7 % (10 %); R144 refusals as stated; R145 junctions 442.86 nm on both engines against
+   255.5 nm amorphous. The traced points lie within 2 px of the ink on the scan.
+
+### A22 (24 Nov 2026, lead): transient enhanced diffusion (TED) from implant damage, an effective "+1" model
+
+0. **What the lead had seen.** (i) P. A. Stolk, H.-J. Gossmann, D. J. Eaglesham et al., "Physical mechanisms of
+   transient enhanced dopant diffusion in ion-implanted silicon", J. Appl. Phys. 81, 6031 (1997), the copy at
+   www.ele.uva.es/~simulacion/StolkJAP97.pdf (SHA-256 52783d9f4a39...): {311} defects hold about one interstitial
+   per implanted ion (the "+1" rule, Figs. 6-7); they dissolve with an activation energy of 3.8 +- 0.2 eV, decay
+   times about 40 s at 815 C and about 4 h at 670 C (40 keV Si, 5e13 cm^-2, Sec. III); B marker layers show a
+   time-averaged diffusivity enhancement near the implanted region of about 200 after 10 min and about 60 after
+   30 min at 790 C (Sec. IV, Fig. 12a); Fig. 1, boron 30 keV 1.5e14 cm^-2 as implanted and after 800 C 35 min
+   (SIMS). (ii) EE212 class handout #14 (Plummer, Deal, Griffin, "Ion implantation", 1999, pages 19-25; the same
+   site as A16's handout, SHA-256 6dfe1738282d...): the +1 model, eq. (20) (the supersaturation during {311}
+   dissolution, a function of temperature only) and its plot (about 1.3e5 at 600 C and 3.5e2 at 1100 C), eq.
+   (21) (tau_enh proportional to Rp Q exp(Eb/kT)). (iii) Handout #12 (A16's), eq. (22) D = D* (f_I C_I/C_I* +
+   f_V C_V/C_V*) and its table f_I: B 1.0, P 1.0, As 0.4, Sb 0.02 (f_V = 1 - f_I). No TED had been computed when
+   items 0 to 7 were committed.
+1. **Description.** `AnnealModels.ted`: "none" (default; left out of the serialised description, so no A16 id
+   changes) or "plus_one". With "plus_one", the implant's damage is taken from the initial profile itself: Q its
+   dose and Rp its mean depth.
+2. **Model (both engines).** While the {311} clusters last, the interstitial supersaturation is S(T), uniform in
+   depth, and every diffusivity of A16.2 is multiplied by f_I S + f_V / S (C_V/C_V* = 1/S, local I-V equilibrium);
+   afterwards by 1. The clusters last tau(T) = tau_ref (Q / Q_ref) (Rp / Rp_ref) exp[E_tau/k (1/T - 1/T_ref)] with
+   tau_ref = 40 s, T_ref = 815 C, Q_ref = 5e13 cm^-2, Rp_ref the mean depth of 40 keV Si in amorphous Si from
+   RustBCA (A7, kr_c, Lindhard-Scharff; computed once and stored with the parameters), E_tau = 3.8 eV (Stolk;
+   the Q Rp scaling is eq. 21's). Over several steps the clusters are used up in proportion: each step consumes
+   its duration over its tau, and TED ends when the sum reaches 1. S(T) = S_ref exp[E_S/k (1/T - 1/T_S)], T_S =
+   790 C, E_S from the handout's plot (its two end points: ln(1.3e5 / 3.5e2) k / (1/873.15 - 1/1373.15) K, = 1.22
+   eV), S_ref calibrated on Stolk's two marker numbers at 790 C for his implant: for an anneal of length t longer
+   than tau, the time-averaged enhancement is (S tau + (t - tau)) / t, so S = (E t - t + tau) / tau; S_ref is the
+   mean of the values from (200, 10 min) and (60, 30 min). Every TED result carries `anneal:ted_effective: the
+   +1 model with a uniform supersaturation; tau and S from Stolk et al. 1997 and the EE212 handout (simws's
+   calibration); no clustering (boron above about 1e18 cm^-3 is immobile in reality), no depth dependence`.
+   The time points of A16.1 plus the moment TED ends, when that falls inside a step.
+3. **Engines.** devsim_anneal and fipy, both.
+4. **Acceptance (tolerances fixed here, before any TED run).**
+   R150 (against Stolk's Figure 1, the validation): the as-implanted SIMS of Fig. 1 (traced) annealed at 800 C
+   for 35 min, "fermi" with "plus_one", on an n-type 1e15 background, thickness 1.5 um: the depths where the
+   result falls to 3e17 and to 1e17 cm^-3 within 15 % of the diffused SIMS of Fig. 1 (traced). Reported: the same
+   without TED, and the peak (not gated: clustering is not modelled).
+   R151 (the two engines with TED): R150's case and B 35 keV 1e14 (A20's crystal profile) at 1000 C 10 s: junction
+   or 1e17 depths within 1 %; doses within the R94 rule of A16.10.
+   R152 (limits): "plus_one" with tau -> 0 (an anneal far longer than tau at high T, 1100 C 1 h) moves the
+   junction by less than 2 % compared with "none" (TED is transient); the enhancement factor equals f_I S + f_V/S
+   at the step's temperature (checked through a public function); tau and S at 815 C / 790 C equal their
+   reference values.
+   R153 (reported): B 35 keV 1e14 crystal (A20) on n-type 1e16, 900 C 10 s, 1000 C 10 s, 1000 C 30 min: junction
+   with and without TED.
+5. **Trust.** Both engines: "verified" as A16.8 (they agree). R150 compares against a measurement not used for
+   the calibration (Fig. 1 is a different implant: B 30 keV 1.5e14 against Si 40 keV 5e13, 800 C against 790 C):
+   a passed R150 recorded as a validation (A13.7) makes the R150 result "validated"; nothing else here is.
+6. **Not in A22.** Boron clustering, depth-dependent interstitials, dislocation loops (doses above about 1e14 Si
+   equivalent), amorphising implants and end-of-range damage, oxidation-enhanced diffusion.
+7. **Clarifications by the lead during development, before the checker (24 Nov).** (a) Stolk's Fig. 1 traced
+   (simws/data/ted/stolk1997_fig1.json; tools/digitise/tracer.py on the figure's image, checked on an overlay):
+   the traces stop where they first fall below 4e16 cm^-3 past 0.3 um (the SIMS noise floor); for the anneal's
+   initial profile the as-implanted trace is extended to 0.7 um with an exponential fitted to its last part (0.33
+   um to the end: -3.14 decades per um), recorded in the file. The traced as-implanted dose is 1.14e14 cm^-2
+   against the nominal 1.5e14 (SIMS calibration and the trace; recorded, not gated); A22.1 takes Q from the
+   profile, so tau uses 1.14e14. (b) Rp_ref computed as item 2 says: 59.02 +- 0.18 nm (RustBCA, 40 keV 28Si,
+   Kr-C, Lindhard-Scharff, 20 000 ions, seed 1). S_ref = 1088 (1152 from 10 min, 1025 from 30 min); E_S = 1.2227 eV.
+8. (c) **R150's record.** So that R150 can be stored as a comparison with a measurement (item 5), the anneal
+   adapters also report `anneal.depth_at_1e17` and `anneal.depth_at_3e17` (m; the deepest depth at or above the
+   level, linear between points; only when the profile starts at or above the level), and the demo ingests the two
+   traced SIMS depths as a measured result (`simws.measured.ingest`, label "validation") and records the
+   comparisons (relative, 15 %).
+9. **After the checker's report (24 Nov).** 44 tests written from A22 (tests/v1/test_ted.py); 42 passed and 2
+   failed at first, both from one defect. **Defect, fixed:** `ted.damage` took the mean depth as trapezoid(c x) /
+   trapezoid(c) over the listed points, leaving out the part held from 0 to the first point and approximating the
+   linear segments (a flat 1e18 profile on 0-0.1 um gave 75 nm, not 50 nm). It now uses the exact moments of
+   A16.1's profile. Effect on the acceptance cases: Stolk's Rp -0.34 % (tau 343.7 s -> about 342.5 s), the crystal
+   profile -0.05 %; no gated number moves noticeably. **Fixed with it:** TED results carried A16.2's flag "not
+   modelled: transient enhanced diffusion ..." next to the TED flag; with TED on it now reads "not modelled:
+   clustering, solid solubility, oxidation and segregation (TED by the effective model of A22)"; the engines'
+   capability notes and chain.process's docstring say the same.
+   **Results:** R150 both engines -8.8 % at 3e17 and -10.9 % at 1e17 (limit 15 %); without TED -21.8 % and -21.5 %;
+   the model moves the tail 0.60 (3e17) and 0.50 (1e17) of the measured shift: half the measured TED. The 15 % gate
+   is not very discriminating at this temperature (no TED misses by only 22 %); the shift ratio is the honest
+   figure. R151 junctions within 0.052 %, x(1e17) within 0.0012 %, doses by the A16.10 rule; R152 1100 C 1 h with
+   TED moves the junction by 0.023 % (2 %), enhancement, tau(815 C) = 40 s and S(790 C) = S_ref exact; R153: 900 C
+   10 s 422.5 -> 431.0 nm, 1000 C 10 s 422.9 -> 425.5 nm, 1000 C 30 min 490.8 -> 493.0 nm. Trust: the devsim TED
+   result of R150 is "validated" after its two measurement comparisons are recorded; a wrong measurement blocks it
+   (tested). Sources: the checker re-read every constant (handout #14's curve end points read at 400 dpi: 1.30e5 at
+   600 C, 3.6e2 at 1100 C, E_S 1.20 eV from raw pixels against 1.2227 from the rounded values; Rp_ref re-run:
+   59.020 nm). Reported: with E_tau = 3.8 eV anchored at 40 s / 815 C, tau(670 C) is 5.6 h against Stolk's "about
+   4 h" (his two decay times alone imply about 3.6 eV, inside his +- 0.2).

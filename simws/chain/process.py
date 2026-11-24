@@ -10,8 +10,9 @@
     r_dev = hub.submit("device.devsim", params={"problem": dp})
     fit = chain.diode.fit_shockley(P.forward_V(dp), P.forward_J(hub.result(r_dev.id), dp), 300.0)
 
-The anneal knows nothing of implant damage (no transient enhanced diffusion, A16.2); the as-implanted profile's
-counting noise is carried into the anneal unchanged.
+Implant damage enters only through the effective TED model of A22 (anneal_problem(..., ) then
+.with_changes({"models.ted": "plus_one"})); without it there is no transient enhanced diffusion (A16.2). The
+as-implanted profile's counting noise is carried into the anneal unchanged.
 """
 from __future__ import annotations
 
@@ -35,19 +36,29 @@ def gaussian_profile(rp_um: float, sigma_um: float, dose_cm2: float, dx_um: floa
     return DepthProfile(depth_um=x.tolist(), concentration_cm3=c.tolist())
 
 
-def initial_from_implant(result, dose_cm2: Optional[float] = None):
+def initial_from_implant(result, dose_cm2: Optional[float] = None, band: int = 0):
     """The as-implanted profile of a stored implant.* result as a DepthProfile (um, cm^-3): its
-    implant.concentration, or implant.profile x dose_cm2 when the result has no concentration (no dose given)."""
+    implant.concentration, or implant.profile x dose_cm2 when dose_cm2 is given (or there is no concentration).
+    band = +1 / -1 (A20.1): the concentration plus / minus its reported sigma at every point, clipped at 0 (the
+    digitisation envelope of a channeling result; not a 1-sigma profile)."""
     from simws.spec.anneal import DepthProfile
+    if band not in (-1, 0, 1):
+        raise ValueError("initial_from_implant: band must be -1, 0 or +1")
     names = {q.name for q in result.quantities}
     if "implant.concentration" in names and dose_cm2 is None:
         q = result.q("implant.concentration")
-        c = np.asarray(q.array(), float) * 1e-6                       # 1/m^3 -> 1/cm^3
+        scale = 1e-6                                                  # 1/m^3 -> 1/cm^3
     else:
         if dose_cm2 is None:
             raise ValueError("initial_from_implant: the result has no implant.concentration; give dose_cm2")
         q = result.q("implant.profile")
-        c = np.asarray(q.array(), float) * 1e-2 * float(dose_cm2)     # 1/m per ion -> 1/cm per ion, x cm^-2
+        scale = 1e-2 * float(dose_cm2)                                # 1/m per ion -> 1/cm per ion, x cm^-2
+    c = np.asarray(q.array(), float) * scale
+    if band:
+        sg = getattr(q.uncertainty, "sigma", None)
+        if sg is None:
+            raise ValueError("initial_from_implant: band needs a result with an uncertainty on its profile")
+        c = c + band * np.broadcast_to(np.asarray(sg, float), c.shape) * scale
     x = np.asarray(q.axes[0].values, float) * 1e6                     # m -> um
     return DepthProfile(depth_um=x.tolist(), concentration_cm3=np.clip(c, 0.0, None).tolist())
 

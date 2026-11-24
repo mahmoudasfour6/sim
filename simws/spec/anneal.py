@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Literal, Optional
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 MAX_POINTS = 20000
 MAX_INTERVALS = 20000
@@ -62,6 +62,14 @@ class AnnealStep(_M):
 
 class AnnealModels(_M):
     diffusivity: Literal["intrinsic", "fermi"] = "intrinsic"
+    ted: Literal["none", "plus_one"] = "none"               # A22.1
+
+    @model_serializer(mode="wrap")
+    def _drop_default(self, handler):
+        d = handler(self)
+        if isinstance(d, dict) and d.get("ted") == "none":   # A22.1: no A16 id changes
+            d.pop("ted", None)
+        return d
 
 
 class AnnealNumerics(_M):

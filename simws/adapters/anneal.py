@@ -100,6 +100,11 @@ class AnnealAdapter(Adapter):
                            axes=axes),
               ctx.quantity("anneal.dose", dose_cm2 * 1e4, "1/m**2"),
               ctx.quantity("anneal.Dt", dif.Dt_cm2(problem) * 1e-4, "m**2")]
+        from simws.process.ted import depth_at                    # A22.8: depths at two levels, for R150's record
+        for level, name in ((1e17, "anneal.depth_at_1e17"), (3e17, "anneal.depth_at_3e17")):
+            d_lv = depth_at(x, c, level)
+            if np.isfinite(d_lv) and c[0] >= level:
+                qs.append(ctx.quantity(name, d_lv * UM, "m"))
         own = "acceptor" if problem.dopant == "B" else "donor"
         if problem.background_cm3 > 0 and problem.background_type != own:
             xj = junction_depth_um(x, c, problem.background_cm3)

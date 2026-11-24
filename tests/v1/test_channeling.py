@@ -624,7 +624,7 @@ def _refusal_cases():
         ("rotation None", b(rotation_deg=None), "angles:"), ("B rotation 22", b(rotation_deg=22.0), "angles:"),
         ("B rotation 30.6", b(rotation_deg=30.6), "angles:"), ("As rotation 30", a(rotation_deg=30.0), "angles:"),
         ("As tilt 6.4", a(tilt_deg=6.4), "angles:"),
-        ("P", implant_si("P", 50, tilt_deg=7, rotation_deg=30, dose_cm2=1e14, crystal=True), "ion:"),
+        ("P", implant_si("P", 50, tilt_deg=7, rotation_deg=30, dose_cm2=1e14, crystal=True), "angles:"),   # amended by the lead (A21.9): phosphorus exists since A21; tilt 7 / rotation 30 is not one of its conditions
         ("B 14 keV", b(E=14), "energy:"), ("B 51 keV", b(E=51), "energy:"), ("B 80 keV", b(E=80), "energy:"),
         ("As 39 keV", a(E=39), "energy:"), ("As 201 keV", a(E=201), "energy:"),
         ("B 1.9e13", b(dose=1.9e13), "dose:"), ("B 2.1e15", b(dose=2.1e15), "dose:"), ("B 1e16", b(dose=1e16), "dose:"),

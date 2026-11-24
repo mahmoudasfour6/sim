@@ -27,8 +27,8 @@ CAPABILITY = AnnealCapability(
                 "Newton): intrinsic or Fermi-level diffusivity of Plummer, Deal and Griffin",
     dopants=["B", "P", "As", "Sb"], diffusivity=["intrinsic", "fermi"], surfaces=["reflecting", "fixed"],
     tested_temperature_C=(800.0, 1200.0),
-    notes="Isothermal steps only; one dopant on a uniform background; no damage (TED), clustering, solubility, "
-          "oxidation or segregation (A16.2).")
+    notes="Isothermal steps only; one dopant on a uniform background; TED only through the effective +1 model "
+          "(A22, models.ted); no clustering, solubility, oxidation or segregation (A16.2).")
 
 DEV, REG = "anneal", "si"
 
@@ -96,9 +96,15 @@ def run(problem, workdir: Optional[str] = None) -> AnnealResult:
     flags = [dif.NOT_MODELLED_FLAG] + ([dif.NI_FLAG] if problem.models.diffusivity == "fermi" else [])
     newton_max = 0
     started = False
-    for step in problem.steps:
+    from simws.process import ted
+    sched = ted.schedule(problem)                                    # A22.2: TED end inside a step is a time point
+    if problem.models.ted == "plus_one":                             # A22.9: not "TED not modelled" any more
+        flags = [ted.NOT_MODELLED_WITH_TED if f == dif.NOT_MODELLED_FLAG else f for f in flags] + [ted.TED_FLAG]
+    ds.set_parameter(device=DEV, region=REG, name="ted_factor", value=1.0)
+    for step, (points, t_end) in zip(problem.steps, sched):
         T = dif.kelvin(step.temperature_C)
-        kexpr = dif.K_expression(problem, T, "C")
+        f_on = ted.enhancement(problem.dopant, T) if problem.models.ted == "plus_one" else 1.0
+        kexpr = f"(ted_factor * {dif.K_expression(problem, T, 'C')})"
         ds.node_model(device=DEV, region=REG, name="K", equation=kexpr)
         ds.node_model(device=DEV, region=REG, name="K:C", equation=f"diff({kexpr}, C)")
         ds.edge_from_node_model(device=DEV, region=REG, node_model="K")
@@ -118,7 +124,9 @@ def run(problem, workdir: Optional[str] = None) -> AnnealResult:
             ds.set_parameter(device=DEV, region=REG, name="pin_scale", value=0.0)
             started = True
         t_prev = 0.0
-        for t in problem.time_points_s(step):
+        for t in points:
+            on = t <= t_end * (1 + 1e-12)
+            ds.set_parameter(device=DEV, region=REG, name="ted_factor", value=float(f_on if on else 1.0))
             info = ds.solve(type="transient_bdf1", tdelta=float(t - t_prev), charge_error=1e30, info=True, **opts)
             if isinstance(info, dict):
                 newton_max = max(newton_max, len(info.get("iterations", [])))

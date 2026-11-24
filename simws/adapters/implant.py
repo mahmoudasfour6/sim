@@ -244,7 +244,8 @@ _CHANNELING_OUTPUTS = [
     OutputSpec(name="implant.concentration", unit="1/m**3", constraint="nonnegative",
                description="dose x profile: the as-implanted concentration"),
     OutputSpec(name="implant.channeled_fraction", unit="dimensionless", constraint="nonnegative",
-               description="share of the dose in the channeling component (A15)"),
+               description="share of the dose in the channeling component (A15); for phosphorus the share deeper "
+                           "than Rpm + 2 dRp2 (A21.8)"),
 ]
 
 
@@ -257,7 +258,7 @@ class ImplantChanneling(Adapter):
                     "(boron: Tasch et al. 1989; arsenic: Suzuki et al. 2000)",
         verification={"model": "evaluated at the figure values moved by their reading uncertainty; half the spread "
                                "is the reported sigma"},
-        inputs=["problem"], outputs=_CHANNELING_OUTPUTS, citations=["tasch1989", "suzuki2000"])
+        inputs=["problem"], outputs=_CHANNELING_OUTPUTS, citations=["tasch1989", "suzuki2000", "ghante1995"])
 
     def resolve(self, params: Dict[str, Any]) -> Dict[str, Any]:
         out = dict(params)

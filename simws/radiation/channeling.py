@@ -266,5 +266,126 @@ class Suzuki(_Model):
         return {"density": dens, "channeled_fraction": fc, "main": na}
 
 
-def model(ion_symbol: str) -> Optional[_Model]:
-    return {"B": Tasch(), "As": Suzuki()}.get(ion_symbol)
+# ------------------------------------------------------------------- phosphorus: our fit to Ghante 1995 (A21)
+
+@lru_cache(maxsize=None)
+def _ghante():
+    return json.loads((DATA / "ghante1995_phosphorus.json").read_text())
+
+
+GHANTE_KEYS = ("Rpm_um", "dRp1_um", "dRp2_um", "L_um", "alpha")
+OWN_FIT_FLAG = "implant:own_fit: simws's fit to the SIMS of Ghante et al. 1995 (not a published model)"
+SIMS_FLAG = "budget:sims_accuracy: the SIMS are good to 50 % in concentration and 10 % in depth"
+GHANTE_LENGTH_REL = 0.10            # A21.3: lengths moved by -/+ 10 % for the reported sigma
+
+
+def ghante_curves(use: str):
+    return [c for c in _ghante()["curves"] if c["use"] == use]
+
+
+def _interp_params(xs, params, x) -> Dict[str, float]:
+    order = np.argsort(xs)
+    xs = np.asarray(xs, float)[order]
+    return {k: float(np.interp(x, xs, np.asarray([params[i][k] for i in order], float))) for k in GHANTE_KEYS}
+
+
+class _GhanteCondition(_Model):
+    """One measured condition of A21.2 (fixed tilt and rotation)."""
+    ion = "P"
+    cite = ("simws fit (A21) to the SIMS of V. Ghante, L. M. Lam, S. Morris, S.-H. Yang, A. F. Tasch et al., MRS "
+            "Symp. Proc. 396, 715 (1995)")
+
+    def __init__(self, name, tilt, rot, energies, doses, conditions):
+        self.name, self.tilt_deg, self.rotation_deg = name, tilt, rot
+        self.energies, self.doses, self.conditions = energies, doses, conditions
+
+    def parameters(self, energy_keV: float, dose_cm2: float) -> Dict[str, float]:
+        raise NotImplementedError
+
+    def valid(self, energy_keV: float, dose_cm2: float) -> Optional[str]:
+        return None
+
+    def components(self, x_um, energy_keV, dose_cm2, scale=1.0):
+        q = self.parameters(energy_keV, dose_cm2)
+        p = {"Rpm": q["Rpm_um"] * scale, "dRp1": q["dRp1_um"] * scale, "dRp2": q["dRp2_um"] * scale,
+             "L": q["L_um"] * scale, "alpha": q["alpha"]}
+        xn = self._norm_grid(p)
+        zc = np.trapezoid(suzuki_channel_shape(xn, p), xn)
+        xx = np.asarray(x_um, float)
+        return suzuki_channel_shape(xx, p) / zc, jhg(xx, p["Rpm"], p["dRp1"], p["dRp2"]) / np.trapezoid(
+            jhg(xn, p["Rpm"], p["dRp1"], p["dRp2"]), xn)
+
+    @staticmethod
+    def _norm_grid(p) -> np.ndarray:
+        """A21.9 (after the checker): the tail exp(-((x - Rpm)/L)^alpha) with alpha near 0.4 reaches far; the grid
+        goes to Rpm + L 80^(1/alpha) (tail below exp(-80)) and is geometric beyond the core."""
+        core = p["Rpm"] + 8.0 * p["dRp2"]
+        far = max(core * 1.01, p["Rpm"] + p["L"] * 80.0 ** (1.0 / p["alpha"]), p["Rpm"] + 60.0 * p["dRp2"])
+        return np.concatenate([np.linspace(0.0, core, 40001)[:-1], np.geomspace(core, far, 40001)])
+
+    def profile(self, x_um, energy_keV, dose_cm2, perturb: int = 0) -> Dict[str, object]:
+        """perturb -1 / +1: every length scaled by 1 -/+ 10 % (the SIMS depth accuracy, A21.3). One component (the
+        fit's form, A21.8): there is no separate channeled share; `channeled_fraction` reports the share deeper
+        than Rpm + 2 dRp2 (the tail beyond the Gaussian core), for information."""
+        dens, core = self.components(x_um, energy_keV, dose_cm2, 1.0 + GHANTE_LENGTH_REL * perturb)
+        q = self.parameters(energy_keV, dose_cm2)
+        sc = 1.0 + GHANTE_LENGTH_REL * perturb
+        cut = (q["Rpm_um"] + 2.0 * q["dRp2_um"]) * sc
+        pp = {"Rpm": q["Rpm_um"] * sc, "dRp2": q["dRp2_um"] * sc, "L": q["L_um"] * sc, "alpha": q["alpha"]}
+        far = self._norm_grid(pp)[-1]
+        xs = np.concatenate([np.linspace(cut, cut + 8.0 * pp["dRp2"], 20001)[:-1],
+                             np.geomspace(cut + 8.0 * pp["dRp2"], max(far, cut + 9.0 * pp["dRp2"]), 20001)])
+        share = float(np.trapezoid(self.components(xs, energy_keV, dose_cm2, sc)[0], xs))
+        return {"density": dens, "channeled_fraction": share, "main": core}
+
+
+class GhanteA(_GhanteCondition):
+    def __init__(self):
+        super().__init__("A", 4.0, 22.0, (15.0, 180.0), (1e14, 1e14),
+                         "condition A of A21: tilt 4 deg, rotation 22 deg, 1e14 cm^-2, 15-180 keV (Figure 1)")
+
+    def parameters(self, energy_keV, dose_cm2):
+        cs = [c for c in ghante_curves("fit_A")]
+        return _interp_params([c["energy_keV"] for c in cs], [c["fit"] for c in cs], energy_keV)
+
+
+class GhanteB(_GhanteCondition):
+    def __init__(self):
+        super().__init__("B", 10.0, 0.0, (30.0, 120.0), (1e13, 8e15),
+                         "condition B of A21: tilt 10 deg, rotation 0 deg; 1e14 cm^-2 at 30-120 keV (Figures 3, 2, 6), "
+                         "1e13-8e15 cm^-2 at 50 keV only (Figure 2)")
+
+    def _energy_set(self):
+        cs = [c for c in ghante_curves("fit_B") if abs(c["dose_cm2"] - 1e14) < 1e8]
+        return [c["energy_keV"] for c in cs], [c["fit"] for c in cs]
+
+    def _dose_set(self):
+        cs = [c for c in ghante_curves("fit_B") if abs(c["energy_keV"] - 50.0) < 1e-9 and c["figure"] == 2]
+        return [math.log10(c["dose_cm2"]) for c in cs], [c["fit"] for c in cs]
+
+    def valid(self, energy_keV, dose_cm2):
+        if abs(dose_cm2 / 1e14 - 1.0) > 1e-6 and abs(energy_keV - 50.0) > 1e-6:
+            return (f"dose: {dose_cm2:.3g} cm^-2 at {energy_keV:g} keV; condition B has doses other than 1e14 only "
+                    f"at 50 keV (A21.2)")
+        return None
+
+    def parameters(self, energy_keV, dose_cm2):
+        if abs(dose_cm2 / 1e14 - 1.0) <= 1e-6:
+            return _interp_params(*self._energy_set(), energy_keV)
+        return _interp_params(*self._dose_set(), math.log10(dose_cm2))
+
+
+class Ghante:
+    """Phosphorus (A21): two measured conditions, chosen by the beam's angles."""
+    ion = "P"
+    conditions_ = (GhanteA(), GhanteB())
+
+    def select(self, tilt_deg: float, rotation_deg: Optional[float], tol: float = 0.5) -> Optional[_GhanteCondition]:
+        for c in self.conditions_:
+            if rotation_deg is not None and abs(tilt_deg - c.tilt_deg) <= tol and abs(rotation_deg - c.rotation_deg) <= tol:
+                return c
+        return None
+
+
+def model(ion_symbol: str):
+    return {"B": Tasch(), "As": Suzuki(), "P": Ghante()}.get(ion_symbol)

@@ -28,8 +28,8 @@ CAPABILITY = AnnealCapability(
                 "intrinsic or Fermi-level diffusivity of Plummer, Deal and Griffin",
     dopants=["B", "P", "As", "Sb"], diffusivity=["intrinsic", "fermi"], surfaces=["reflecting", "fixed"],
     tested_temperature_C=(800.0, 1200.0),
-    notes="Isothermal steps only; one dopant on a uniform background; no damage (TED), clustering, solubility, "
-          "oxidation or segregation (A16.2).")
+    notes="Isothermal steps only; one dopant on a uniform background; TED only through the effective +1 model "
+          "(A22, models.ted); no clustering, solubility, oxidation or segregation (A16.2).")
 
 
 def available() -> bool:
@@ -63,19 +63,25 @@ def run(problem, workdir: Optional[str] = None) -> AnnealResult:
     if problem.surface == "fixed":
         C.constrain(float(problem.surface_concentration_cm3), mesh.facesLeft)
     flags = [dif.NOT_MODELLED_FLAG] + ([dif.NI_FLAG] if problem.models.diffusivity == "fermi" else [])
-    linear = problem.models.diffusivity == "intrinsic"
+    linear = problem.models.diffusivity == "intrinsic"            # (a TED factor is constant within a step)
     sweeps_max = 0
-    for step in problem.steps:
+    from simws.process import ted
+    sched = ted.schedule(problem)                                    # A22.2: TED end inside a step is a time point
+    if problem.models.ted == "plus_one":                             # A22.9: not "TED not modelled" any more
+        flags = [ted.NOT_MODELLED_WITH_TED if f == dif.NOT_MODELLED_FLAG else f for f in flags] + [ted.TED_FLAG]
+    for step, (points, t_end) in zip(problem.steps, sched):
         T = dif.kelvin(step.temperature_C)
+        f_on = ted.enhancement(problem.dopant, T) if problem.models.ted == "plus_one" else 1.0
         Kc = fp.CellVariable(mesh=mesh, value=dif.K(problem, np.asarray(C.value), T))
         eq = fp.TransientTerm() == fp.DiffusionTerm(coeff=Kc.arithmeticFaceValue)
         t_prev = 0.0
-        for t in problem.time_points_s(step):
+        for t in points:
             dt = float(t - t_prev)
+            factor = f_on if t <= t_end * (1 + 1e-12) else 1.0
             C.updateOld()
             n = 0
             while True:
-                Kc.setValue(dif.K(problem, np.asarray(C.value), T))
+                Kc.setValue(factor * dif.K(problem, np.asarray(C.value), T))
                 before = np.array(C.value, copy=True)
                 eq.sweep(var=C, dt=dt)
                 n += 1

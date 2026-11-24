@@ -23,14 +23,16 @@ FINE = 20                  # sub-points per depth bin for the bin average
 
 CAPABILITY = ImplantCapability(
     engine=NAME, env="tcad", in_process=True,
-    description="Channeling in (100) silicon from published fits: boron (Tasch et al. 1989, dual Pearson, SIMS) "
-                "and arsenic (Suzuki et al. 2000, joined half Gaussian with tail, tuned Monte Carlo)",
+    description="Channeling in (100) silicon from fits: boron (Tasch et al. 1989, dual Pearson, SIMS), arsenic "
+                "(Suzuki et al. 2000, joined half Gaussian with tail, tuned Monte Carlo) and phosphorus (simws's fit to "
+                "the SIMS of Ghante et al. 1995, A21)",
     structures=["crystalline_si_100"], potentials=["zbl", "kr_c", "moliere"],
     electronic_stopping=["lindhard_scharff", "empirical"], recoils=[False], max_layers=1, max_keV_per_amu=25.0,
-    tested_keV_per_amu=(0.53, 4.55), tested_target_symbols=["Si"], tested_ion_symbols=["B", "As"],
+    tested_keV_per_amu=(0.48, 5.81), tested_target_symbols=["Si"], tested_ion_symbols=["B", "As", "P"],
     notes="Boron 15-50 keV, 2e13-2e15 cm^-2, tilt 7 deg, rotation 30 deg; arsenic 40-200 keV, 1e11-1e16 cm^-2, "
-          "tilt 7 deg, rotation 22 deg; one layer of bare crystalline silicon; a dose is required. Depth profile "
-          "only (no lateral spread). Unverified by rule: no second channeling engine.")
+          "tilt 7 deg, rotation 22 deg; phosphorus 15-180 keV at 1e14 (tilt 4, rotation 22) and tilt 10, rotation 0 "
+          "(30-120 keV at 1e14, 1e13-8e15 at 50 keV); one layer of bare crystalline silicon; a dose is required. "
+          "Depth profile only (no lateral spread). Unverified by rule: no second channeling engine.")
 
 FLAG_FMT = ("implant:published_fit: {cite}; {conditions}; the models and statistics of the description are not "
             "used (A15)")
@@ -39,17 +41,26 @@ BUDGET_FLAG = ("budget:digitisation_only: the uncertainty is that of reading the
 
 
 def _model(problem):
+    """The fit for this ion; for phosphorus the measured condition matching the beam's angles (A21), or None."""
     from simws.radiation import channeling as ch
-    return ch.model(problem.beam.ion.symbol)
+    m = ch.model(problem.beam.ion.symbol)
+    if m is not None and hasattr(m, "select"):
+        return m.select(problem.beam.tilt_deg, problem.beam.rotation_deg, ANGLE_TOL_DEG)
+    return m
 
 
 def unsupported(problem) -> List[str]:
     out = CAPABILITY.unsupported(problem)
     m = _model(problem)
     ion = problem.beam.ion
-    if m is None or (ion.symbol == "B" and round(ion.mass_amu) != 11) or (ion.symbol == "As" and round(ion.mass_amu) != 75):
-        out.append(f"ion: {ion.symbol} ({ion.mass_amu:g} u) has no published channeling fit here (11B: Tasch 1989; "
-                   f"75As: Suzuki 2000; phosphorus needs Suzuki et al. 1999)")
+    if ion.symbol == "P" and round(ion.mass_amu) == 31 and m is None:
+        out.append(f"angles: tilt {problem.beam.tilt_deg:g} deg, rotation {problem.beam.rotation_deg} deg; phosphorus "
+                   f"is fitted at tilt 4 / rotation 22 and tilt 10 / rotation 0 only (A21.2; set beam.rotation_deg)")
+        return out
+    if m is None or (ion.symbol == "B" and round(ion.mass_amu) != 11) or (ion.symbol == "As" and round(ion.mass_amu) != 75) \
+            or (ion.symbol == "P" and round(ion.mass_amu) != 31):
+        out.append(f"ion: {ion.symbol} ({ion.mass_amu:g} u) has no channeling fit here (11B: Tasch 1989; "
+                   f"75As: Suzuki 2000; 31P: simws's fit to Ghante 1995)")
         return out
     layers = problem.target.layers
     if len(layers) != 1 or set(layers[0].density_cm3) != {"Si"}:
@@ -62,6 +73,8 @@ def unsupported(problem) -> List[str]:
         out.append("dose: the channeled share depends on the dose; give beam.dose_cm2")
     elif not m.doses[0] * (1 - 1e-9) <= d <= m.doses[1] * (1 + 1e-9):
         out.append(f"dose: {d:.3g} cm^-2 outside {m.doses[0]:.0e}-{m.doses[1]:.0e} for {m.ion} (A15.2)")
+    if d is not None and hasattr(m, "valid") and m.valid(E, d):
+        out.append(m.valid(E, d))
     if abs(problem.beam.tilt_deg - m.tilt_deg) > ANGLE_TOL_DEG:
         out.append(f"angles: tilt {problem.beam.tilt_deg:g} deg; the {m.ion} fit is for {m.tilt_deg:g} deg")
     rot = problem.beam.rotation_deg
@@ -124,9 +137,14 @@ def run(problem, workdir=None) -> ImplantResult:
     diag = {"model": type(m).__name__.lower(), "source": m.cite, "share_beyond_target": lost,
             "Rp_um": rp0, "Rp_sigma_um": 0.5 * abs(hi[3] - lo[3]), "dRp_um": drp0,
             "dRp_sigma_um": 0.5 * abs(hi[4] - lo[4])}
+    from simws.radiation import channeling as ch
+    if m.ion == "P":                     # A21.9: not a published fit; the conditions go in the diagnostics
+        flags = [ch.OWN_FIT_FLAG, ch.SIMS_FLAG]
+        diag["conditions"] = m.conditions
+    else:
+        flags = [FLAG_FMT.format(cite=m.cite, conditions=m.conditions), BUDGET_FLAG]
     return ImplantResult(engine=NAME, problem_id=problem.problem_id(), n_ions=0, n_reflected=0, n_transmitted=0,
                          depth_um=[], lateral_um=[], profile_um=centres, profile_per_um=p0.tolist(),
                          profile_sigma_per_um=sig.tolist(), channeled_fraction=fc0,
                          channeled_fraction_sigma=0.5 * abs(hi[1] - lo[1]),
-                         flags=[FLAG_FMT.format(cite=m.cite, conditions=m.conditions), BUDGET_FLAG],
-                         diagnostics=diag)
+                         flags=flags, diagnostics=diag)
