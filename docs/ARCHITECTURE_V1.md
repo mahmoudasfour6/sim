@@ -2947,3 +2947,206 @@ had a default L_um (2.5) and returns a number, not a problem. L_um is now requir
 (3) `test_unsupported_two_grade_terms` (written before A23) expected any second grading term to be refused; A23.7(b)
 allows ordered, non-overlapping terms, so the test now checks the refusal A23.7(b) keeps (overlapping terms). The
 lead should have run the whole fast suite before recording A23; it is run before every update from now on.
+
+### A23, A24 and A23b, laptop run (update 14, 24 Nov 2026)
+
+Update 14 committed on arch/v1 as ee80a7c and master fast-forwarded. (First attempt stopped on an untracked
+`logs_install_v1/` in the worktree; it is now in the repo's local info/exclude.) Fast suite: 2108 passed, 34 skipped,
+9 xfailed in 24 min 47 s (build machine: 11 min, 2.2x). Quick acceptance: 32 passed, 2 skipped (no PDFs on the
+laptop, R160's hash check) in 1 min 2 s; R161 xfailed as recorded, with the build machine's numbers to every printed
+digit (IC 1.053 to 1.175, IB 0.968 to 1.031, RsBi 13201 ohm/sq), as are R180 and R181. R161's single 2D Gummel sweep
+took 14 min 3 s against 2 min 41 s here (5.2x, not 2x): the 5AM device's solves are slower on the laptop than the
+fast suite's, so the slow tier (2 h here) should be planned at 6 to 10 hours there, not 4.
+
+### A23b closed: the 5AM device's known limits (24 Nov 2026, owner's decision)
+
+Mahmoud chose not to look for a depth-scaled 5AM / 5HP SIMS profile and to move on to A25 (option 2). The A23b
+device and calibration (k_B 0.681, k_P 1.822, S_p 6.24e5 cm/s; s 0.80, k_E 1) are frozen for A25 to A29, and its
+recorded failures stand as known limits, carried into the paper's table as FAILs.
+- **Use it for** (validated against held-out or calibration data within the contract's tolerances): the 300 K
+  base current and forward Gummel shape to 0.78 V (IB within 3 %, IC within 17.5 %), the intrinsic base sheet
+  resistance from 393 K to 162 K, BVCBO, VBE(T) from 393 K to 77 K (within 18.5 mV), peak gain from 223 K to 93 K.
+- **Do not lean on** (recorded failures): the base-collector junction and collector profile (Early voltage a factor
+  6 to 11 low, M - 1 a factor 3 to 22 high, fT +48 %), the collector current's last 15 to 25 %, and the base sheet
+  resistance below 100 K. Any later result that depends on these (inverse-mode base current, collector charge
+  collection in A27, cold base resistance in A29) carries this in its stated uncertainty, and each contract says
+  so before its runs.
+
+### A25 (24 Nov 2026, lead): total dose on the 5AM, interface traps and oxide charge at the spacer and the STI
+
+A25 replaces the provisional TID constants (simws.radiation.hbt_rad, v0) with a v1 feature, traps and charge on
+named Si/SiO2 interfaces of a DeviceSpec, and fits three knobs to the 5AM's 63 MeV proton response at 300 K; then
+predicts other doses, the JC-fixed extraction, another chip, other radiation sources, the shape of the excess base
+current, and irradiation at 77 K. The device is the frozen A23b 5AM (k_B 0.681, k_P 1.822, S_p 6.24e5 cm/s; s 0.80,
+k_E 1), unchanged.
+
+0. **What the lead had seen.** A. K. Sutton, PhD thesis, Georgia Tech, Aug 2009 (the copy the owner supplied, its
+   SHA-256 in sutton2009.json): the text of sections 3.4 to 4.2 and 6.2 (pages 60 to 85, 128 to 130); the page
+   images, at low resolution, of **Figs. 24, 33, 34 and 73** (no values read off them beyond the following).
+   Fig. 24 (63 MeV protons, 300 K, forward mode, 5AM and three later generations): the 5AM's dIB/IB0 at VBE = 0.6 V
+   rises roughly from 0.3 at 0.3 Mrad(SiO2) to about 10 at 6 Mrad, near-linear in dose. Fig. 33 (5AM 0.5 x 2.5
+   um^2, Co-60, 10 keV X-ray and 63 MeV protons): forward about 0.1 to 10 over 0.3 to 6 Mrad (the text: D^1.3, proton
+   and gamma matched up to 3 Mrad, X-ray larger, attributed to dose enhancement by W / Cu studs near the spacer);
+   inverse about 10 to 40 (D^0.3; gamma slightly above proton, both above X-ray). Fig. 73 (5AM 0.5 x 1.0, forward,
+   at JC = 10 nA/um^2): 300 K about 0.3 to 20, 77 K about 0.05 to 1 over 0.1 to 6 Mrad (the text: "more than an
+   order of magnitude reduction" when irradiated cold, attributed to holes self-trapped in the oxide and fewer
+   interface traps). The text also gives: inverse-mode IB is set by the STI-to-SIC distance and the 5AM's STI has
+   excess H2 (its inverse response is the largest of the four generations); inverse saturation is explained by
+   oxide-trapped charge accumulating the base surface; ideality of dIB near 2 (Figs. 38 to 40, not viewed); dose
+   rates 1 krad/s (protons), 30 rad/s (Co-60), 540 rad/s (X-ray); 1 rad(Si) = 1.8 rad(SiO2) for 10 keV X-rays;
+   all terminals grounded during irradiation; anneal and stress results on 8HP (not used). Not viewed: Figs. 22,
+   23, 25, 26, 39, and Fig. 72's post-irradiation curves. No A25 simulation had been run when items 0 to 6 were
+   committed.
+1. **Data** (vector traces of the thesis, as A23.1; `sutton2009.json` gains the keys below; catalog roles as A23
+   set them: `sutton2004.figs21_26` calibration, `sutton2007.figs33_39` and `prakash2006.fig73` validation):
+   (a) Fig. 22, the 5AM's (0.5 x 1.0) inverse-mode Gummel, pre-irradiation, 300 K (`fig22`, role validation, under
+   sutton2004.figs21_26 as a per-curve role); (b) Figs. 24 and 26, the 5AM's forward and inverse dIB/IB0 at VBE =
+   0.6 V and at JC = 1 uA/um^2 vs proton dose, with the error bars as min / max (`fig24`, `fig26`); Figs. 23 and 25
+   (the same as dJB) are traced and used only to check the traces (dJB = dIB/IB0 x JB0 within the trace error);
+   (c) Fig. 33, 5AM 0.5 x 2.5, forward and inverse, three sources (`fig33`); (d) Fig. 39, n of dIB vs VBE for the
+   5AM, three sources (`fig39`); (e) Fig. 72's post-irradiation curves (1, 3, 6 Mrad; 300 K and 77 K; `fig72`
+   gains them beside the pre-irradiation curves); (f) Fig. 73's 5AM series (`fig73`). The 8HP / 7HP / 9T series in
+   the same panels are not traced. The calibration points are the 5AM's **VBE = 0.6 V** series of Figs. 24 and 26 at
+   **1 and 6 Mrad(SiO2)** (four numbers); every other point of every A25 figure is validation.
+2. **The interface feature (engine, spec).** `DeviceSpec.interfaces: List[Interface]`, each: `name`, `region`,
+   `side` (y_min, y_max, x_min, x_max), `span` (um, along the side), `N_it_cm2` (>= 0; interface traps at midgap,
+   sigma_n = sigma_p = `sigma_cm2`, default 1e-15 cm^2, the v0 constant, not a knob), `N_ot_cm2` (>= 0; a fixed
+   positive sheet charge q N_ot on that boundary). Absent or empty: the problem id is unchanged (the serializer drops
+   it, as A23b.1). DEVSIM: the surface recombination U_s = s (n p - n_ie^2) / (n + p + 2 n_ie), s = sigma v_th
+   N_it, v_th = 1e7 cm/s x sqrt(T / 300 K), enters both continuity equations on the boundary nodes of the span as
+   U_s x (boundary length / NodeVolume) (the v0 surface factor, exact as a surface integral on the mesh); N_ot enters
+   Poisson as q N_ot x (boundary length / NodeVolume). Charon refuses interfaces ("interfaces: interface traps and
+   oxide charge (A25) are not translated to Charon"). The engine reports, per interface, the recombination current
+   q integral U_s dl at every bias point (`interface_current_A`, per cm of depth like the contact currents).
+3. **The 5AM's two interfaces** (`ibm5am_hbt(..., spacer=(N_it, N_ot), sti=(N_it, N_ot))`, both default absent):
+   the **EB spacer**, the top surface from the emitter edge to the extrinsic base, x in [0.21, 0.36] um (y_min);
+   the **STI sidewall**, the cell's outer edge x = 1.2 um (x_max), from the surface down to 0.2 um below the
+   extrinsic base (y in [0, y_xb + 0.2]), where the base-collector junction meets it. The STI position is a
+   modelling choice (the STI-to-SIC distance is not published); its magnitude is absorbed by k_I below, so a chip with
+   a different STI-to-SIC distance is not predicted by it. The current to one device: per-cm values x 2L for the
+   bulk (as A23.2) and x the emitter perimeter P_E = 2 (L + W_E) for each interface's excess (W_E = 0.5 um drawn;
+   the spacer runs round the emitter; the STI is taken to follow it, stated as an approximation). Inverse mode: the
+   collector is the emitter (base swept, the physical emitter tied to the base, VCB_inverse = 0; the physical
+   collector grounded); JC in inverse mode is the physical emitter's current over the drawn AE.
+4. **Dose -> traps (knobs, A25.3).** N_it,spacer = k_F x D, N_it,STI = k_I x D, N_ot (both interfaces) = k_Q x D,
+   with D in Mrad(SiO2), linear: interface traps build up linearly to 6 Mrad (Sutton: forward near-linear), and the
+   inverse-mode sub-linearity is left to the oxide charge, as Sutton explains it (accumulation of the base surface).
+   Ranges: k_F and k_I 1e9 to 1e13 cm^-2 per Mrad, k_Q 0 to 1e13 cm^-2 per Mrad (fitted in log10, k_Q in log10 of
+   1e8 + k_Q). This replaces the plan's third knob (a saturation dose) because a saturation dose cannot be told from
+   the oxide charge with four calibration numbers, and Sutton names the charge. Fit: least squares in log10 of
+   dIB/IB0 at VBE = 0.6 V, forward and inverse, 1 and 6 Mrad, 300 K (Figs. 24, 26, the 5AM's mean points). The
+   fitted knobs and residuals are stored in `simws/data/validation/ibm5am_tid.json`. Source differences (charge
+   yield by LET, X-ray dose enhancement), dose rate, displacement damage and temperature-dependent build-up are not
+   modelled: the knobs are per Mrad(SiO2) of 63 MeV protons, and other sources and 77 K use them unchanged.
+   Measurement temperature equals irradiation temperature (Sutton measured the cold parts cold).
+5. **Acceptance** (tolerances fixed here; "a factor F" = max of the two ratios):
+   R190: data and catalog (each new trace loads with units, source, method; roles as item 1; ingest labels them so;
+   Figs. 23 / 25 consistent with 24 / 26 within the combined trace error).
+   R191: the feature against closed forms. (a) No interfaces: currents bit-identical to the A23b device, id
+   unchanged. (b) A 1D n+/p diode's p side with a surface on its free boundary, low injection: the excess current
+   equals the reported q integral U_s dl within 1 % (U_s from the solved n, p on the boundary: what the engine
+   reports is what it solves), and the excess current is linear in N_it within 2 % from 1e9 to 1e11 cm^-2; at
+   zero bias the excess current is zero within the solver's absolute resolution. (c) N_ot: the change of the total charge in
+   the silicon equals -q N_ot x the span within 1 % (Gauss), at equilibrium.
+   R192: refusals (negative N_it / N_ot or sigma, a span off its side, an interface on a contact's nodes, Charon).
+   R193: the calibration fit: the four calibration points within a factor 1.5 (reported per point).
+   R194: other doses, VBE = 0.6 V, Figs. 24 / 26 (5AM, 0.1 to 3 Mrad): within a factor 2 at every traced dose;
+   the log-log slope between 0.3 and 3 Mrad reported for both modes against Sutton's D^1 / D^0.3.
+   R195: the JC = 1 uA/um^2 series of Figs. 24 / 26 (5AM, every dose): within a factor 2.
+   R196: Fig. 33 (5AM 0.5 x 2.5, L = 2.5): protons within a factor 2 at every dose, both modes (another chip, the
+   perimeter scaling of item 3); Co-60 within a factor 2 (reported separately: the model has no source dependence);
+   10 keV X-ray within a factor 2 with the dose converted as Sutton plots it (rad(SiO2)). Expected trouble: the
+   forward X-ray response (dose enhancement, not modelled).
+   R197: the ideality of dIB, n = (q / kT) / (d ln dIB / dVBE), at VBE 0.5, 0.6 and 0.7 V against Fig. 39 (5AM, 3
+   Mrad, each source, each mode): within 0.3.
+   R198: Fig. 72's post-irradiation 300 K forward IB at 1, 3 and 6 Mrad, at every traced VBE from 0.45 to 0.75 V:
+   within a factor 2 (the 0.5 x 1.0 chip; the model's pre-irradiation IB there is reported first, as R174 did).
+   R199: 77 K (Figs. 72 and 73): dIB/IB0 at JC = 10 nA/um^2 with the 300 K knobs, at every traced dose: within a
+   factor 2; 300 K points of Fig. 73 within a factor 2 too. Expected FAIL at 77 K (Sutton: more than 10x lower
+   measured; the model has no temperature-dependent build-up). A FAIL is recorded; temperature-dependent build-up
+   would be a separate amendment (A25b), decided after.
+   R189: the model's inverse-mode Gummel (pre-irradiation) against Fig. 22 at VBE 0.5 to 0.8 V: IC and IB reported
+   per point; IB within a factor 3 gated. The A23b device's collector profile is a recorded limit (A23b closed), so
+   this is expected to be the weakest check, and every inverse-mode result above inherits its error through IB0.
+6. **Trust.** The calibrated 300 K results become validated only where R194 to R198 pass for that mode; 77 K
+   results stay verified at most (R199). The hub records the knobs' file hash with each result, as A23.5.
+
+**A25, clarifications (24 Nov 2026, before any 5AM total-dose run).** (a) R191(b) as written was wrong physics:
+traps on a surface also lower the minority density near it, so the bulk recombination and the minority current
+into the contacts change too, and the excess terminal current is not q integral U_s dl (on the lead's first trial
+diode, a 2D n+/p diode with the interface on its free side, the total anode current rose by 0.66 x q integral U_s;
+the hole current at the anode rose by exactly q integral U_s). R191(b) is therefore: the hole-continuity balance of
+the whole device, I_p(anode) + I_p(cathode) = q integral U_bulk dV + q integral U_s dl, within 1 % with and without
+interfaces (what the engine reports is what it solves, and the interface term is in the equations), and q integral
+U_s dl linear in N_it within 2 % from 1e10 to 1e11 cm^-2; at zero bias the interface current is zero within the
+solver's resolution. The diode is 2D (interfaces are 2D only, item 2): n+ 1e19 to 0.5 um over p 1e17, 1 x 3 um,
+contacts on y_min and y_max, the interface on x_max over y 0.6 to 2.9 um. That trial run, before this
+clarification: the balance held to 7 digits; q integral U_s 5.049e-10 and 5.030e-9 A/cm at N_it 1e10 and 1e11
+(0.4 % from linear); Gauss for N_ot = 1e11 over 2.3 um: -2.2991e7 against -2.3e7 per cm (0.04 %).
+(b) An interface's share of a node on a contact (the contact's end node) is dropped, as the contact's equations
+hold there: on the 5AM spacer this is half a mesh spacing (2 nm of 150 nm) at the emitter edge.
+(c) R197's VBE: Fig. 39 spans 0.55 to 0.74 V (seen after item 0 was written, with Figs. 22 and 72); the points
+are 0.6 and 0.7 V, and the lowest traced, 0.55 V, in place of 0.5 V.
+(d) Fig. 22's two 5AM curves are not labelled: the tracer assigns IB by the factor between Figs. 25 / 26 and the
+curve at 0.6 V, the same factor (2.5) that Figs. 23 / 24 show against Fig. 72's forward IB (`fig22.assignment`):
+the lower curve is IB. The ratio figures (23 to 26) use a current density 2.5 x Fig. 72's for the same 0.5 x 1.0
+device (perhaps another normalization); A25 compares only their ratios dIB/IB0, which do not depend on it.
+(e) R190: the JC = 1 uA/um^2 series of Figs. 23 / 24 agree within 0.6 % except the 0.3 Mrad point (14 %), and of
+25 / 26 the same within 16 %; the VBE = 0.6 V series agree within 0.6 %. The gate stays on both series as
+written (no narrowing after the trace): the JC series fail it, a property of the published points (the trace
+error is about 2 %), recorded as a FAIL of R190's JC part.
+(f) The engine's per-interface recombination current is reported as `interface_current_A_per_cm` (A per cm of
+depth, as the contact currents of a 2D device; item 2 wrote `interface_current_A`): the name says the unit.
+
+**A25, what the lead had seen before the fit (24 Nov 2026).** A smoke run of the A23b 5AM (L = 1 um, half cell,
+no scaling to the perimeter) at VBE 0.5 to 0.75 V: forward, spacer N_it 1e11 raises IB at 0.6 V by 16 %, 1e12 by
+162 % (linear in N_it), IC unchanged; spacer N_it 1e12 with N_ot 1e12 raises IB by 1480 % and IC by 13 %. Inverse,
+STI N_it 1e11 raises IB by 7.6 %, 1e12 by 76 %; IB0 (inverse) at 0.6 V is 7.3e-10 A for the 0.5 x 1.0 device (Fig.
+22's IB there corresponds to 1.6e-9 A). The checker's fast tier: 37 passed, 2 strict xfails (R190's JC series),
+1 skipped (the knobs file); it found two code issues (vbe_at_jc extrapolated past the sweep; a docstring name),
+fixed. The fit starts from k_F 5e11, k_I 3e12, k_Q 1e11 cm^-2 per Mrad, chosen from the smoke run.
+
+### A25, build-machine results (24 Nov 2026)
+
+**The fit (A25.4).** From k_F 5e11, k_I 3e12, k_Q 1e11: 24 evaluations (4 sweeps each on two workers), xtol.
+Result **k_F 4.77e11, k_I 9.99e12 (the range's top), k_Q 5.45e10 cm^-2 per Mrad(SiO2)**. Calibration points
+(dIB/IB0 at 0.6 V, 0.5 x 1.0 chip): forward 1.34 / 11.1 against 1.31 / 11.25 (1.05 / 6.3 Mrad); inverse 11.3 / 52.3
+against 24.3 / 49.6. The inverse response of the model grows near-linearly with dose (STI traps), the measured one
+as D^0.4 to D^0.6: the fit splits the difference by putting k_I at its upper limit.
+
+**The first slow run** (the checker's suite as written: 15 to 17 doses on 23 VBE points, serially) did not finish in
+4 h (one mode); the lead changed the slow tier's grids (the dose set 0.18 to 6.3 Mrad with interpolation between
+neighbouring doses, a 0.04 V VBE grid plus +-10 mV around R197's points, sweeps in parallel; `tests/v1/test_tid_5am.py`
+says so where it does it); no gate or tolerance changed. It found a tracing error: Fig. 72's post-irradiation trace
+held the legend's line samples (1e-5 to 1e-4 A/um^2 at 0.46 to 0.50 V), fixed in the tracer before R198 was
+recorded. Slow tier, 50 min on two workers (R198 re-run after the fix): **7 passed, 16 failed**.
+- R189 pass: inverse JB within a factor 2.33 of Fig. 22 at 30 traced VBE (limit 3); IC within 1.24 (reported).
+- R193: forward pass (1.02, 1.01); inverse FAIL (1.05 Mrad: factor 2.14; 6.3 Mrad: 1.06).
+- R194: forward pass (factors 1.28, 1.15, 1.57 at 0.31, 0.63, 3.1 Mrad; slope 1.03, measured 1.34); inverse FAIL
+  (2.81, 2.54, 1.41; slope 0.94, measured 0.64).
+- R195 FAIL both modes: at JC = 1 uA/um^2 the model's forward ratio is 0.09 to 4.6 against 0.12 to 6.6 (factors 1.3
+  to 3.1), inverse 1.1 to 13.6 against 6.0 to 30.3 (2.2 to 5.6).
+- R196 (0.5 x 2.5 chip): pass for forward Co-60 (worst 1.93) and inverse X-ray (1.70); FAIL for forward protons
+  (3.95 at 0.31 Mrad, where Fig. 33's proton point, 0.077, is 4 x Fig. 24's on the other chip; 3.22 at 3.15 Mrad),
+  forward X-ray (up to 3.19: the dose enhancement, expected), inverse protons (3.27 to 1.09) and inverse Co-60
+  (5.28 to 1.91): below 1 Mrad the inverse model is a factor 2.5 to 5 low.
+- R197: inverse Co-60 and X-ray pass (worst 0.29, 0.28); FAIL forward (all sources: the model's n falls from 1.71 at
+  0.55 V to 1.33 at 0.7 V, measured 1.7 to 1.9 throughout) and inverse protons (0.31 at 0.7 V).
+- R198 FAIL: the model's pre-irradiation JB is within 0.91 to 1.00 of Fig. 72; after 1, 3, 6 Mrad the worst factors
+  are 2.16, 3.01, 3.03 (the model low at the top of the window, where its excess current flattens: the n above).
+- R199 FAIL at 77 K, as expected (Fig. 73: factors 6.4, 2.1, 2.5, 1.8, 13 at 0.1 to 6.3 Mrad; from Fig. 72: 11 to
+  18); at 300 K Fig. 73 passes at four doses (1.11, 1.02, 1.22, 1.47) and fails at 3.15 Mrad by 0.5 % (2.010).
+- R190's JC part (clarification e): FAIL, as recorded.
+
+**What the numbers say.** Forward mode at fixed VBE is the model's good part: one knob (the spacer traps) with the
+oxide charge carries the 0.5 x 1.0 chip from 0.3 to 6 Mrad within a factor 1.6, Co-60 on the other chip within
+1.9, and Fig. 73's 300 K points within 1.5 but one. Where it fails, it fails in two ways. (1) The shape of the
+excess current: the model's surface-recombination current bends over above 0.6 V (n 1.6 to 1.3) where Sutton's
+stays near n = 1.8 to 1.9, so every comparison at a higher VBE or at a fixed JC = 1 uA/um^2 (VBE 0.70 V) comes out
+low (R195, R197, R198). A midgap single-level trap at the spacer cannot hold n near 2 to 0.7 V in this device; a
+trap distribution across the gap or a wider surface depletion along the spacer would. (2) Inverse mode: the STI
+interface on the cell's edge (A25.3's modelling choice) gives a response linear in dose, while the measured one
+saturates (D^0.3 to D^0.6); with the oxide charge shared with the spacer, k_Q cannot do both, and the fit leaves
+inverse 1 Mrad a factor 2.1 low. Sutton's own explanation (accumulation of the base surface by the STI's trapped
+charge) needs the STI's own oxide-charge rate, not a shared one. 77 K fails as the contract expected (no
+temperature-dependent build-up). These are recorded as xfail(strict=True) with these numbers; no tolerance changed.

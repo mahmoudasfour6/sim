@@ -327,9 +327,13 @@ def _build(problem: Problem) -> _State:
             circuit_element(name="C_load", n1=_node(ld.contact), n2="0", value=ld.C_F / A)
         on_circuit[ld.contact] = True
     extra = _strike_footprint(problem, region.name) if isinstance(problem.analysis, StrikeTransient) else None
+    surf_U, surf_Q = _interfaces(problem, region.name)
+    if surf_U:
+        extra = (f"({extra}) - ({surf_U})" if extra else f"-({surf_U})")
+    xcharge = (lambda n_expr: f"({surf_Q})") if surf_Q else None
     try:
         used = setup_region(DEVICE, region.name, load(region.material), net, tot, phys,
-                            on_circuit, extra_generation=extra)
+                            on_circuit, extra_generation=extra, extra_charge=xcharge)
     except RuntimeError as e:
         if _no_convergence(e):
             raise NotConverged(f"equilibrium solve at 0 V: {e}") from e
@@ -345,7 +349,91 @@ def _build(problem: Problem) -> _State:
     if problem.models.temperature_K < 250.0:             # contract A5.4: the legacy adapter's warning, kept
         flags.append("cryo_unvalidated: below 250 K checked against closed forms and Charon only, "
                      "not against measured devices")
+    if dev.interfaces:
+        from devsim.python_packages.model_create import CreateNodeModel
+        for i in dev.interfaces:
+            CreateNodeModel(DEVICE, region.name, _if_name(i.name, "U"), _if_rate(problem, i))
     return _State(problem, used, region.name, opts, flags)
+
+
+# ------------------------------------------------------------------------------------------ A25.2 interfaces
+V_TH_300_CM_S = 1e7
+
+
+def _if_name(name: str, what: str) -> str:
+    return f"If{what}_{name}"
+
+
+def _if_rate(problem: Problem, i) -> str:
+    """U_s x (boundary length / NodeVolume) at the interface's nodes, pairs/cm^3/s (midgap traps, sigma_n = sigma_p;
+    with Fermi-Dirac statistics the equilibrium product and the trap densities carry the degeneracy factors, as the
+    bulk SRH term does, so that U_s = 0 at equilibrium)."""
+    T = problem.models.temperature_K
+    s = i.sigma_cm2 * V_TH_300_CM_S * float(np.sqrt(T / 300.0)) * i.N_it_cm2
+    fd = problem.models.statistics == "fermi_dirac"
+    npeq = "exp(LnGn + LnGp)*n_ie^2" if fd else "n_ie^2"
+    n1, p1 = ("exp(LnGn)*n_ie", "exp(LnGp)*n_ie") if fd else ("n_ie", "n_ie")
+    return (f"{_if_name(i.name, 'Fac')}*{s!r}*(Electrons*Holes - {npeq})"
+            f"/(Electrons + {n1} + Holes + {p1})")
+
+
+def interface_factor(problem: Problem, region: str, i) -> np.ndarray:
+    """Per node: (the length of the interface it represents / NodeVolume), 1/cm; 0 off the interface and on contact
+    nodes (their equations are the contact's). The lengths are the node's half-spacings along the side, clipped to
+    the span, so that sum(U factor NodeVolume) is the line integral of U along the interface."""
+    from devsim import get_node_model_values
+    g = lambda k: np.asarray(get_node_model_values(device=DEVICE, region=region, name=k), float)  # noqa: E731
+    x, y, vol = g("x") / UM, g("y") / UM, g("NodeVolume")
+    r = problem.device.region(i.region)
+    if i.side in ("y_min", "y_max"):
+        on = np.isclose(y, r.box.y[0] if i.side == "y_min" else r.box.y[1], rtol=0, atol=1e-7)
+        along, full = x, r.box.x
+    else:
+        on = np.isclose(x, r.box.x[0] if i.side == "x_min" else r.box.x[1], rtol=0, atol=1e-7)
+        along, full = y, r.box.y
+    lo, hi = i.span or full
+    idx = np.where(on)[0]
+    o = idx[np.argsort(along[idx])]
+    a = along[o]
+    mid = np.concatenate(([a[0]], 0.5 * (a[1:] + a[:-1]), [a[-1]]))
+    seg = np.clip(np.minimum(mid[1:], hi) - np.maximum(mid[:-1], lo), 0, None) * UM
+    f = np.zeros_like(x)
+    f[o] = np.where(vol[o] > 0, seg / vol[o], 0.0)
+    for c in problem.device.contacts:                       # contact nodes: the contact's equations hold there
+        if c.region == i.region and c.side == i.side:
+            cl, ch = c.span or full
+            f[on & (along >= cl - 1e-7) & (along <= ch + 1e-7)] = 0.0
+    return f
+
+
+def _interfaces(problem: Problem, region: str):
+    """Creates each interface's factor (a node solution) and returns (the recombination expression, the positive
+    charge expression in elementary charges / cm^3), each '' when there is none."""
+    dev = problem.device
+    if not dev.interfaces:
+        return "", ""
+    from devsim import node_solution, set_node_values
+    U, Q = [], []
+    for i in dev.interfaces:
+        f = interface_factor(problem, region, i)
+        name = _if_name(i.name, "Fac")
+        node_solution(device=DEVICE, region=region, name=name)
+        set_node_values(device=DEVICE, region=region, name=name, values=[float(v) for v in f])
+        if i.N_it_cm2 > 0:
+            U.append(_if_rate(problem, i))
+        if i.N_ot_cm2 > 0:
+            Q.append(f"{name}*{float(i.N_ot_cm2)!r}")
+    return " + ".join(U), " + ".join(Q)
+
+
+def interface_currents(problem: Problem, region: str) -> Dict[str, float]:
+    """q x the line integral of U_s along each interface (A per cm of depth), from the present solution."""
+    from devsim import get_node_model_values
+    from simws.units import Q_E
+    vol = np.asarray(get_node_model_values(device=DEVICE, region=region, name="NodeVolume"), float)
+    return {i.name: float(Q_E * np.sum(np.asarray(get_node_model_values(device=DEVICE, region=region,
+                                                                        name=_if_name(i.name, "U")), float) * vol))
+            for i in problem.device.interfaces}
 
 
 LOAD_SOURCE = "I_load"                                   # A18.2 (Norton form of supply and R)
@@ -396,12 +484,16 @@ def run(problem: Problem, workdir: Optional[Path] = None, _post_build=None) -> E
         return _small_signal(problem, st, contacts, unit, diag)
     if isinstance(an, StrikeTransient):
         return _strike(problem, st, contacts, unit, diag)
+    ifc = bool(problem.device.interfaces)
     if not isinstance(an, DCSweep):
         i0 = st.currents()
+        if ifc:
+            diag["interface_current_A_per_cm"] = {k: [v] for k, v in interface_currents(problem, st.region).items()}
         return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="equilibrium",
                             sweep_contact=None, sweep_V=[0.0], currents={k: [v] for k, v in i0.items()},
                             current_unit=unit, flags=st.flags, diagnostics=_json(diag))
     cur: Dict[str, List[float]] = {k: [] for k in contacts}
+    icur: Dict[str, List[float]] = {i.name: [] for i in problem.device.interfaces}
     reached = 0.0
     try:
         for name, v in an.fixed_V.items():
@@ -413,11 +505,16 @@ def run(problem: Problem, workdir: Optional[Path] = None, _post_build=None) -> E
             reached = v
             for k, i in st.currents().items():
                 cur[k].append(i)
+            if ifc:
+                for k, i in interface_currents(problem, st.region).items():
+                    icur[k].append(i)
     except RuntimeError as e:
         if not _no_convergence(e):
             raise
         raise NotConverged(f"{an.contact} reached {reached:g} V of {list(an.values_V)} "
                            f"({len(cur[contacts[0]])} points done): {e}") from e
+    if ifc:
+        diag["interface_current_A_per_cm"] = icur
     return EngineResult(engine="devsim", problem_id=problem.problem_id(), analysis="dc_sweep",
                         sweep_contact=an.contact, sweep_V=[float(v) for v in an.values_V], currents=cur,
                         current_unit=unit, flags=st.flags, diagnostics=_json(diag))

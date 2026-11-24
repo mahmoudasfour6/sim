@@ -115,3 +115,57 @@ def ingest(hub, dataset: str, axis: Optional[Tuple[str, str, str]], columns: Dic
 def load(dataset: str, T_K: Optional[float] = None) -> dict:
     """A23.1's name for `curve`."""
     return curve(dataset, T_K)
+
+
+# ---------------------------------------------------------------------------------------------- A25.1: dose series
+def series(dataset: str, path: str) -> dict:
+    """One dose series of a total-dose figure, by its path in the figure's `series` ('VBE_0.6V',
+    'proton_63MeV/forward', '300.0'): arrays dose_rad_SiO2 and value (and min / max where error bars were drawn)."""
+    fig, src = figure(dataset)
+    s = fig.get("series")
+    if not isinstance(s, dict):
+        raise ValueError(f"{dataset} has no dose series")
+    for k in path.split("/"):
+        if k not in s:
+            raise KeyError(f"{dataset}: no series {path!r}")
+        s = s[k]
+    out = {k: (np.asarray([np.nan if v is None else v for v in s[k]], float) if isinstance(s[k], list) else s[k])
+           for k in s}
+    out["source"] = src
+    return out
+
+
+def point_roles(dataset: str, path: str):
+    """The role of every point of a dose series (A25.1): 'calibration' for the doses the catalog row names under
+    calibration_points for that series, the row's role for the rest."""
+    e = entry(dataset)
+    s = series(dataset, path)
+    roles = np.array([e["role"]] * len(s["dose_rad_SiO2"]), dtype=object)
+    cp = e.get("calibration_points")
+    if cp and cp.get("series") == path:
+        for d in cp["dose_rad_SiO2"]:
+            roles[np.abs(s["dose_rad_SiO2"] / float(d) - 1.0) < 0.02] = "calibration"
+    return roles
+
+
+def ingest_series(hub, dataset: str, path: str, quantity: str = "dIB_over_IB0"):
+    """simws.measured.ingest of a dose series, one measured set per role (never a point under another's role):
+    returns {role: record}. Trend and input datasets are refused, as `ingest`."""
+    from simws.measured import ingest as _ingest
+    e = entry(dataset)
+    if e["role"] not in ("calibration", "validation"):
+        raise ValueError(f"{dataset}: role {e['role']!r} is not ingested (only calibration and validation data are)")
+    s = series(dataset, path)
+    r = point_roles(dataset, path)
+    out = {}
+    for lab in ("calibration", "validation"):
+        m = r == lab
+        if not m.any():
+            continue
+        meta = {"source": f"{e['paper']}; read from {e['read_from']} ({s['source']['cite']})",
+                "pdf_sha256": s["source"]["pdf_sha256"], "dataset": dataset, "series": path, "device": e["device"],
+                "conditions": e["conditions"], "digitized": True}
+        name = f"{dataset}.{path.replace('/', '.')}.{lab}"
+        out[lab] = _ingest(hub, name, ("dose", [float(v) for v in s["dose_rad_SiO2"][m]], "rad"),
+                           {quantity: ([float(v) for v in s["value"][m]], "dimensionless")}, meta, label=lab)
+    return out

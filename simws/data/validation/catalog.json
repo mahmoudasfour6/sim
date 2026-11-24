@@ -110,7 +110,7 @@
    "paper": "Prakash et al., IEEE TNS 53(6):3175, 2006",
    "read_from": "Sutton 2009 PhD thesis, Figure 72",
    "device": "IBM 5AM, 0.5 x 1.0 um^2",
-   "conditions": "pre-irradiation Gummel, 300 K and 77 K",
+   "conditions": "forward Gummel, pre-irradiation (A24) and after 1, 3 and 6 Mrad(SiO2) of 63 MeV protons (A25), 300 K and 77 K",
    "role": "validation",
    "file": "sutton2009.json",
    "key": "fig72"
@@ -121,10 +121,86 @@
    "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
    "read_from": "Sutton 2009 PhD thesis, Figs. 21-26",
    "device": "IBM 5AM to 9T",
-   "conditions": "Delta IB / IB0 vs 63 MeV proton dose, 300 K",
+   "conditions": "Delta IB / IB0 vs 63 MeV proton dose, 300 K; the group row (A23); the traced figures are its parts (A25.1), calibration points named there",
    "role": "calibration",
    "file": null,
-   "key": null
+   "key": null,
+   "parts": [
+    "sutton2004.fig22",
+    "sutton2004.fig23",
+    "sutton2004.fig24",
+    "sutton2004.fig25",
+    "sutton2004.fig26"
+   ]
+  },
+  {
+   "id": "sutton2004.fig22",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figure 22",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "inverse-mode Gummel, pre-irradiation, VCB = 0 V, 300 K (A25 R189)",
+   "role": "validation",
+   "file": "sutton2009.json",
+   "key": "fig22"
+  },
+  {
+   "id": "sutton2004.fig23",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figure 23",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "forward dJB vs 63 MeV proton dose, 300 K: the trace check of Figure 24 only (A25 R190)",
+   "role": "trend",
+   "file": "sutton2009.json",
+   "key": "fig23"
+  },
+  {
+   "id": "sutton2004.fig24",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figure 24",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "forward dIB/IB0 at VBE = 0.6 V and at JC = 1 uA/um^2 vs 63 MeV proton dose, 300 K",
+   "role": "validation",
+   "calibration_points": {
+    "series": "VBE_0.6V",
+    "dose_rad_SiO2": [
+     1050000.0,
+     6300000.0
+    ]
+   },
+   "file": "sutton2009.json",
+   "key": "fig24"
+  },
+  {
+   "id": "sutton2004.fig25",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figure 25",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "inverse dJB vs 63 MeV proton dose, 300 K: the trace check of Figure 26 only (A25 R190)",
+   "role": "trend",
+   "file": "sutton2009.json",
+   "key": "fig25"
+  },
+  {
+   "id": "sutton2004.fig26",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figure 26",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "inverse dIB/IB0 at VBE = 0.6 V and at JC = 1 uA/um^2 vs 63 MeV proton dose, 300 K",
+   "role": "validation",
+   "calibration_points": {
+    "series": "VBE_0.6V",
+    "dose_rad_SiO2": [
+     1050000.0,
+     6300000.0
+    ]
+   },
+   "file": "sutton2009.json",
+   "key": "fig26"
   },
   {
    "id": "sutton2007.figs33_39",
@@ -132,10 +208,36 @@
    "paper": "Sutton et al., RADECS 2007",
    "read_from": "Sutton 2009 PhD thesis, Figs. 33, 35, 39",
    "device": "first generation",
-   "conditions": "Co-60, X-ray, proton",
+   "conditions": "Co-60, X-ray, proton; the group row (A23); the traced figures are its parts (A25.1)",
    "role": "validation",
    "file": null,
-   "key": null
+   "key": null,
+   "parts": [
+    "sutton2007.fig33",
+    "sutton2007.fig39"
+   ]
+  },
+  {
+   "id": "sutton2007.fig33",
+   "stage": "A25",
+   "paper": "Sutton et al., RADECS 2007",
+   "read_from": "Sutton 2009 PhD thesis, Figure 33",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "forward and inverse dIB/IB0 at VBE = 0.6 V vs dose: Co-60, 10 keV X-ray, 63 MeV protons, 300 K",
+   "role": "validation",
+   "file": "sutton2009.json",
+   "key": "fig33"
+  },
+  {
+   "id": "sutton2007.fig39",
+   "stage": "A25",
+   "paper": "Sutton et al., RADECS 2007",
+   "read_from": "Sutton 2009 PhD thesis, Figure 39",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "ideality of dIB vs VBE after 3 Mrad(SiO2), three sources, forward and inverse, 300 K",
+   "role": "validation",
+   "file": "sutton2009.json",
+   "key": "fig39"
   },
   {
    "id": "prakash2006.fig73",
@@ -143,10 +245,10 @@
    "paper": "Prakash et al., IEEE TNS 53(6):3175, 2006",
    "read_from": "Sutton 2009 PhD thesis, Fig. 73",
    "device": "IBM 5AM 0.5 x 1.0 um^2",
-   "conditions": "irradiated at 77 K and 300 K",
+   "conditions": "forward dIB/IB0 at JC = 10 nA/um^2 vs 63 MeV proton dose, irradiated and measured at 300 K and at 77 K",
    "role": "validation",
-   "file": null,
-   "key": null
+   "file": "sutton2009.json",
+   "key": "fig73"
   },
   {
    "id": "pellish2006.fig2c_4",

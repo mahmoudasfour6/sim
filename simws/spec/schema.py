@@ -121,6 +121,25 @@ class Contact(_M):
         return self
 
 
+class Interface(_M):
+    """A25.2: a Si/SiO2 interface on one side of a region (2D): interface traps at midgap (sigma_n = sigma_p =
+    sigma_cm2) adding the surface recombination q s (n p - n_ie^2) / (n + p + 2 n_ie), s = sigma v_th N_it, and a
+    fixed positive sheet charge q N_ot. span limits it along the side (micrometres); None = the whole side."""
+    name: str
+    region: str
+    side: Side
+    span: Optional[Tuple[float, float]] = None
+    N_it_cm2: float = Field(default=0.0, ge=0.0)
+    N_ot_cm2: float = Field(default=0.0, ge=0.0)
+    sigma_cm2: float = Field(default=1e-15, gt=0.0)
+
+    @model_validator(mode="after")
+    def _span(self):
+        if self.span is not None and not self.span[0] < self.span[1]:
+            raise ValueError(f"interface '{self.name}': span must have lower < upper")
+        return self
+
+
 class DopingTerm(_M):
     """A uniform concentration of one dopant type inside a box. Terms add: the donor density at a point is the sum
     of every donor term whose box contains it (likewise acceptors)."""
@@ -213,12 +232,15 @@ class DeviceSpec(_M):
     mesh: MeshHints
     description: str = ""
     profiles: List[ProfileTerm] = Field(default_factory=list)     # A16.5: tabulated doping (e.g. after an anneal)
+    interfaces: List[Interface] = Field(default_factory=list)     # A25.2: interface traps and oxide charge
 
     @model_serializer(mode="wrap")
     def _drop_unset(self, handler):
         d = handler(self)
         if isinstance(d, dict) and not d.get("profiles"):          # A16.5: no id changes without profiles
             d.pop("profiles", None)
+        if isinstance(d, dict) and not d.get("interfaces"):        # A25.2: no id changes without interfaces
+            d.pop("interfaces", None)
         return d
 
     @model_validator(mode="after")
@@ -251,6 +273,27 @@ class DeviceSpec(_M):
                 raise ValueError("profiles: a 1D device has profiles along x only")
         if (self.mesh.y_lines is None) != (self.dimension == 1):
             raise ValueError("mesh: y_lines are required for 2D and forbidden for 1D")
+        names = [i.name for i in self.interfaces]
+        if len(set(names)) != len(names):
+            raise ValueError("interfaces: names must be unique")
+        for i in self.interfaces:
+            if self.dimension != 2:
+                raise ValueError(f"interface '{i.name}': interfaces are for 2D devices (A25.2)")
+            if i.region not in rn:
+                raise ValueError(f"interface '{i.name}': unknown region '{i.region}'")
+            r = self.region(i.region)
+            along = r.box.x if i.side in ("y_min", "y_max") else r.box.y
+            if i.span is not None and (i.span[0] < along[0] - 1e-9 or i.span[1] > along[1] + 1e-9):
+                raise ValueError(f"interface '{i.name}': span {i.span} is off its side {i.side} "
+                                 f"({along[0]:g} to {along[1]:g} um)")
+            for c in self.contacts:
+                if c.region != i.region or c.side != i.side:
+                    continue
+                a = i.span or along
+                b = c.span or along
+                if min(a[1], b[1]) - max(a[0], b[0]) > 1e-9:
+                    raise ValueError(f"interface '{i.name}' overlaps contact '{c.name}' on {i.side}: an interface "
+                                     "cannot sit on a contact's nodes")
         return self
 
     # -------------------------------------------------------------------------------------- reference evaluators

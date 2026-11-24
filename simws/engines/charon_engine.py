@@ -93,6 +93,8 @@ def unsupported(problem: Problem) -> List[str]:
     dev, m, a = problem.device, problem.models, problem.analysis
     if any(c.hole_recombination_velocity_cm_s is not None for c in dev.contacts):
         out.append("contacts: a finite hole recombination velocity (A23b) is not translated to Charon")
+    if dev.interfaces:
+        out.append("interfaces: interface traps and oxide charge (A25) are not translated to Charon")
     step = _pn_step(problem)
     if step is None:
         out.append("doping: Charon translator supports an abrupt two-term pn step only"
