@@ -300,10 +300,12 @@ def test_unsupported_region_not_at_origin():
 
 
 def test_unsupported_two_grade_terms():
+    # A23.7(b) allows several grading terms when ordered and non-overlapping (same element, axis and mode); this
+    # test, written before A23, refused any second term. It now checks the refusal A23.7(b) keeps: overlapping terms.
     from simws.engines.base import Unsupported
     p = npn_hbt_2d()
     g = p.device.grading[0].model_dump(mode="json")
-    g2 = {**g, "start_um": 0.2, "stop_um": 0.3}
+    g2 = {**g, "start_um": 0.05, "stop_um": 0.1}
     p2 = p.with_changes({"device.grading": [g, g2]})
     with pytest.raises(Unsupported):
         _engine().run(p2)

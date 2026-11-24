@@ -20,7 +20,7 @@ from simws.spec.see import (BeolLayer, EdepHistogram, SeeGeometry, SeePhysics, S
                              SeeStatistics)
 from simws.spec.implant import Atom, Beam, ImplantModels, ImplantProblem, Layer, Statistics, Target
 from simws.spec.schema import (Box, Contact, DCSweep, DeviceSpec, DopingTerm, Equilibrium, GradeTerm, MeshHints,
-                               ModelSpec, Numerics, Problem, Region, Track)
+                               ModelSpec, Numerics, Problem, ProfileTerm, Region, Track)
 
 
 def pn_diode_1d(NA_cm3: float = 1e17, ND_cm3: float = 1e16, junction_um: float = 1.0, length_um: float = 4.0,
@@ -256,3 +256,124 @@ def diode_iv(IS_A: float = 1e-14, N: float = 1.0, start: float = 0.30, stop: flo
         Element(name="d1", kind=kind, nodes=["a", "0"], model="dmod")], models=[m],
         analysis=DcSweep(source="vin", start=start, stop=stop, step=step), probes=["i(vin)"],
         temperature_C=temperature_C, tnom_C=tnom_C)
+
+
+# ---------------------------------------------------------------------------------------------- IBM 5AM (A23)
+IBM5AM_RANGES = {"s_um": (0.3, 1.2), "k_B": (0.5, 2.0), "k_E": (0.3, 3.0),     # A23.3
+                 "k_P": (0.1, 2.0), "S_p": (1e3, 1e7)}                          # A23b.3
+IBM5AM_EMITTER_HALF_UM = 0.21          # A23.2: half the effective emitter width (0.42 um, Sutton Table 2)
+IBM5AM_SPACER_UM = 0.15
+IBM5AM_BASE_CONTACT_UM = 0.8
+IBM5AM_WIDTH_UM = 1.2
+
+
+def _ibm5am_sims():
+    import json
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "validation", "luo2011.json")
+    with open(path) as f:
+        return json.load(f)["fig1_2"]
+
+
+def ibm5am_hbt(s_um: float, k_B: float, k_E: float, L_um: float = 2.5, T: float = 300.0,
+               VBE: Optional[Sequence[float]] = None, VCB: float = 0.0, mesh_scale: float = 1.0,
+               impact_ionization: bool = False, analysis=None, k_P: float = 1.0,
+               S_p: Optional[float] = None) -> Problem:
+    """Contract A23.2: the IBM 5AM npn SiGe HBT rebuilt from Luo's SIMS (Fig. 1.2, traced), a 2D half cell (x = 0
+    the symmetry plane through the emitter's centre). The device's terminal current is the engine's current per cm
+    of depth x 2 x L (`ibm5am_scale`). Knobs (A23.3): s_um, micrometres per unit of the figure's depth axis; k_B
+    and k_E, factors on the traced boron and emitter arsenic.
+
+    Clarification (A23.7): the emitter is a box (x <= 0.21 um, from the poly / mono interface to the end of the
+    traced As) at the trace's mean concentration there x k_E, because a tabulated profile cannot be confined
+    laterally; the base boron, collector phosphorus and buried arsenic are tabulated profiles across the cell."""
+    checks = [("s_um", s_um), ("k_B", k_B), ("k_E", k_E), ("k_P", k_P)] + ([("S_p", S_p)] if S_p is not None else [])
+    for name, v in checks:
+        lo, hi = IBM5AM_RANGES[name]
+        if not lo <= v <= hi:
+            raise ValueError(f"device: {name} = {v} outside its range [{lo}, {hi}] (A23.3)")
+    if not L_um > 0:
+        raise ValueError("device: L_um must be > 0")
+    import numpy as np
+    f = _ibm5am_sims()
+    u0 = float(f["u_poly_mono"])
+
+    def y_of(u):
+        return s_um * (np.asarray(u, float) - u0)
+
+    def tab(series, key="conc_cm3", factor=1.0, floor=None):
+        u, c_raw = np.asarray(series["u"], float), np.asarray(series[key], float)
+        c = c_raw * factor
+        keep = u >= u0
+        if floor is not None:                     # the SIMS floor applies to the trace itself, before any factor
+            keep &= c_raw >= floor
+        y = y_of(u[keep])
+        c = c[keep]
+        order = np.argsort(y, kind="stable")
+        y, c = y[order], c[order]
+        dup = np.concatenate(([True], np.diff(y) > 1e-9))
+        return y[dup], c[dup]
+
+    # emitter: mean of the traced mono-emitter As (u from the poly / mono line to the trace's end)
+    ye, ce = tab(f["As_emitter"])
+    t_e = float(ye[-1])
+    N_E = k_E * float(np.trapezoid(ce, ye) / (ye[-1] - ye[0]))
+    yb, cb = tab(f["B"], factor=k_B)
+    yp, cp = tab(f["P"], factor=k_P, floor=f["P_floor_cm3"])
+    ya, ca = tab(f["As_buried"])
+    y_end = s_um * (1.0 - u0)
+    depth = float(y_end + 0.5)
+    ya = np.append(ya, depth)
+    ca = np.append(ca, ca[-1])
+    # the extrinsic base reaches down to where the traced boron falls below 1e17 on the collector side
+    ipk = int(np.argmax(cb))
+    below = np.where(cb[ipk:] < 1e17 * k_B)[0]
+    y_xb = float(yb[ipk + below[0]]) if len(below) else float(yb[-1])
+    yg, xg = tab(f["Ge"], key="fraction")
+    grading = [GradeTerm(element="Ge", axis="y", start_um=float(a), stop_um=float(b), x_start=float(max(p, 0.0)),
+                         x_stop=float(max(q, 0.0)))
+               for a, b, p, q in zip(yg[:-1], yg[1:], xg[:-1], xg[1:]) if b > a]
+    we, xs, xb, W = IBM5AM_EMITTER_HALF_UM, IBM5AM_EMITTER_HALF_UM + IBM5AM_SPACER_UM, IBM5AM_BASE_CONTACT_UM, \
+        IBM5AM_WIDTH_UM
+    doping = [DopingTerm(species="donor", concentration_cm3=N_E, box=Box(x=(None, we), y=(None, t_e)),
+                         include_upper=True, label="emitter"),
+              DopingTerm(species="acceptor", concentration_cm3=1e20, box=Box(x=(xs, None), y=(None, y_xb)),
+                         include_upper=True, label="extrinsic base")]
+    profiles = [ProfileTerm(species="acceptor", axis="y", position_um=[float(v) for v in yb],
+                            concentration_cm3=[float(v) for v in cb], label="base boron (Luo Fig. 1.2)"),
+                ProfileTerm(species="donor", axis="y", position_um=[float(v) for v in yp],
+                            concentration_cm3=[float(v) for v in cp], label="collector phosphorus (Luo Fig. 1.2)"),
+                ProfileTerm(species="donor", axis="y", position_um=[float(v) for v in ya],
+                            concentration_cm3=[float(v) for v in ca], label="buried arsenic (Luo Fig. 1.2)")]
+    ybase_hi = float(yb[ipk + below[0]]) if len(below) else t_e + 0.1
+    x_lines = sorted({(0.0, 0.03), (we - 0.03, 0.008), (we, 0.004), (we + 0.03, 0.008), (xs, 0.01),
+                      (xb, 0.03), (W, 0.06)})
+    y_lines = sorted({(0.0, 0.003), (t_e, 0.001), (ybase_hi, 0.003), (ybase_hi + 0.15, 0.015),
+                      (float(ya[0]), 0.03), (depth, 0.06)})
+    dev = DeviceSpec(
+        name="ibm5am_hbt", dimension=2,
+        regions=[Region(name="si", material="silicon", box=Box(x=(0.0, W), y=(0.0, depth)))],
+        contacts=[Contact(name="emitter", region="si", side="y_min", span=(0.0, we),
+                          hole_recombination_velocity_cm_s=None if S_p is None else float(S_p)),
+                  Contact(name="base", region="si", side="y_min", span=(xb, W)),
+                  Contact(name="collector", region="si", side="y_max")],
+        doping=doping, grading=grading, profiles=profiles,
+        mesh=MeshHints(x_lines=x_lines, y_lines=y_lines, scale=mesh_scale),
+        description=f"IBM 5AM SiGe HBT half cell (A23): s {s_um:g} um, k_B {k_B:g}, k_E {k_E:g}, L {L_um:g} um"
+                    + ("" if k_P == 1.0 else f", k_P {k_P:g}")
+                    + ("" if S_p is None else f", S_p {S_p:g} cm/s")
+                    + ("" if (k_P == 1.0 and S_p is None) else " (A23b)"))
+    models = ModelSpec(temperature_K=T, statistics="fermi_dirac", mobility="klaassen", srh="scharfetter",
+                       auger=True, band_gap_narrowing="slotboom", incomplete_ionization="altermatt",
+                       impact_ionization="van_overstraeten" if impact_ionization else "off")
+    if analysis is None:
+        analysis = Equilibrium() if VBE is None else DCSweep(
+            contact="base", values_V=[float(v) for v in VBE], step_V=0.05,
+            tracking=[Track(contact="collector", offset_V=float(VCB), step_V=0.1)])
+    return Problem(device=dev, models=models, analysis=analysis,
+                   numerics=Numerics(relative_error=1e-8, absolute_error=1e10, max_iterations=40))
+
+
+def ibm5am_scale(L_um: float) -> float:
+    """cm of depth -> one 5AM device: the half cell's current per cm x 2 halves x L (A23.2)."""
+    return 2.0 * L_um * 1e-4

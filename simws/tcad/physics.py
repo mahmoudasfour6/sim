@@ -61,6 +61,8 @@ class Physics:
     # 200 K, where minority densities fall below 1e-300 cm^-3 and double-precision Newton updates stall
     extended_precision: Optional[bool] = None
     extra: Dict[str, float] = field(default_factory=dict)
+    # A23b: contacts with a finite hole recombination velocity (contact name -> S in cm/s); the others ohmic
+    hole_recombination_velocity: Dict[str, float] = field(default_factory=dict)
 
     @property
     def cryo(self) -> bool:
@@ -378,7 +380,7 @@ def setup_region(device, region, mat, net_doping: str, total_doping: str, phys: 
         used["impact_gamma"] = impact_gamma(mat, T)
         models.impact_ionization(device, region, mat, gamma=used["impact_gamma"])
     for c, circ in contacts.items():
-        _carrier_contact(device, region, c, circ, cryo=phys.cryo)
+        _carrier_contact(device, region, c, circ, cryo=phys.cryo, S_p=phys.hole_recombination_velocity.get(c))
     if solve_equilibrium:
         tol = 1e-8
         try:
@@ -430,7 +432,9 @@ def _potential_contact(device, region, contact, is_circuit, cryo=False):
     contact_equation(**kw)
 
 
-def _carrier_contact(device, region, contact, is_circuit, cryo=False):
+def _carrier_contact(device, region, contact, is_circuit, cryo=False, S_p=None):
+    """Ohmic carrier boundary conditions (n = n_eq, p = p_eq). A23b: with S_p (cm/s) the hole equation at the contact
+    keeps the bulk flux and adds the surface loss q S_p (p - p_eq) per unit contact area (a Robin condition)."""
     from devsim import contact_equation
     from devsim.python_packages.model_create import CreateContactNodeModel
     for eq, var, edge, expr in (
@@ -439,9 +443,21 @@ def _carrier_contact(device, region, contact, is_circuit, cryo=False):
             ("HoleContinuityEquation", "Holes", "HoleCurrent",
              "Holes - P0eq" if cryo else f"Holes - {_P0}")):
         name = f"{contact}node{var.lower()}"
-        CreateContactNodeModel(device, contact, name, expr)
-        CreateContactNodeModel(device, contact, f"{name}:{var}", "1")
-        kw = dict(device=device, contact=contact, name=eq, node_model=name, edge_current_model=edge)
+        robin = S_p is not None and var == "Holes"
+        if robin:
+            peq = "P0eq" if cryo else f"({_P0})"
+            # DEVSIM integrates a contact node_model over the node's volume: the surface flux is divided by it
+            CreateContactNodeModel(device, contact, name,
+                                   f"ElectronCharge * {float(S_p)!r} * (Holes - {peq}) * ContactSurfaceArea"
+                                   " / NodeVolume")
+            CreateContactNodeModel(device, contact, f"{name}:{var}",
+                                   f"ElectronCharge * {float(S_p)!r} * ContactSurfaceArea / NodeVolume")
+            kw = dict(device=device, contact=contact, name=eq, node_model=name, edge_model=edge,
+                      edge_current_model=edge)
+        else:
+            CreateContactNodeModel(device, contact, name, expr)
+            CreateContactNodeModel(device, contact, f"{name}:{var}", "1")
+            kw = dict(device=device, contact=contact, name=eq, node_model=name, edge_current_model=edge)
         if is_circuit:
             kw["circuit_node"] = _bias(contact)
         contact_equation(**kw)

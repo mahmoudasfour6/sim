@@ -94,9 +94,24 @@ class Contact(_M):
     span: Optional[Tuple[float, float]] = None
     kind: Literal["ohmic", "schottky"] = "ohmic"
     barrier_eV: Optional[float] = None    # electron barrier height, schottky only
+    # A23b: a finite hole recombination velocity at an ohmic contact (cm/s): the hole flux out of the device there is
+    # q S (p - p_eq) instead of p = p_eq (a polysilicon emitter's effective contact). None = ohmic as before
+    hole_recombination_velocity_cm_s: Optional[float] = None
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler):
+        d = handler(self)
+        if isinstance(d, dict) and d.get("hole_recombination_velocity_cm_s") is None:   # A23b: no id changes
+            d.pop("hole_recombination_velocity_cm_s", None)
+        return d
 
     @model_validator(mode="after")
     def _kind(self):
+        if self.hole_recombination_velocity_cm_s is not None:
+            if self.kind != "ohmic":
+                raise ValueError(f"contact '{self.name}': a hole recombination velocity is for ohmic contacts only")
+            if not self.hole_recombination_velocity_cm_s > 0:
+                raise ValueError(f"contact '{self.name}': the hole recombination velocity must be > 0")
         if self.kind == "schottky" and self.barrier_eV is None:
             raise ValueError(f"contact '{self.name}': a schottky contact needs barrier_eV")
         if self.kind == "ohmic" and self.barrier_eV is not None:

@@ -28,7 +28,7 @@ CAPABILITY = Capability(
     band_gap_narrowing=["off", "slotboom"], incomplete_ionization=["off", "altermatt", "constant_energy"],
     impact_ionization=["off", "van_overstraeten"], analyses=["equilibrium", "dc_sweep", "small_signal", "strike"],
     tested_temperature_K=(250.0, 400.0), mesh_study=True,
-    notes="2D contacts only on y_min / y_max (pad regions); one grading term; one region starting at the origin")
+    notes="2D contacts only on y_min / y_max (pad regions); several grading terms only in order, not overlapping, of one element, axis and mode (A23.2); one region starting at the origin")
 
 # the Newton tolerance below which setup_region's equilibrium solve counts as nominal
 _NOMINAL_REL_TOL = 1e-8
@@ -49,8 +49,12 @@ def unsupported(problem: Problem) -> List[str]:
             break
     if problem.analysis.kind == "strike" and dev.dimension != 1:
         out.append("strike: the strike analysis is for 1D devices only (A17.1)")
-    if len(dev.grading) > 1:
-        out.append(f"grading: {len(dev.grading)} grading terms; the DEVSIM translator takes one")
+    if len(dev.grading) > 1:                                  # A23.2: piecewise-linear Ge from several terms
+        g0 = dev.grading[0]
+        if any(g.element != g0.element or g.axis != g0.axis or g.mode != g0.mode for g in dev.grading):
+            out.append("grading: several grading terms must share element, axis and mode")
+        elif any(b.start_um < a.stop_um - 1e-12 for a, b in zip(dev.grading, dev.grading[1:])):
+            out.append("grading: several grading terms must be in order and must not overlap")
     if dev.regions and not any(s.startswith("regions:") for s in out):
         r = dev.regions[0]
         for name, iv, lines in (("x", r.box.x, dev.mesh.x_lines),
@@ -122,6 +126,33 @@ def set_profiles(problem: Problem, region: str) -> None:
         set_node_values(device=DEVICE, region=region, name=name, values=[float(a) for a in v])
 
 
+GRADE_SOLUTION = "GradeFraction"                       # A23.2: several grading terms, evaluated at the nodes
+
+
+def grade_values(grading, coord_um: np.ndarray) -> np.ndarray:
+    """A23.2: the mole fraction of several ordered, non-overlapping linear terms at the given coordinates (um): each
+    term on [start, stop), the last on [start, stop]; zero elsewhere."""
+    c = np.asarray(coord_um, float)
+    v = np.zeros_like(c)
+    for k, g in enumerate(grading):
+        last = k == len(grading) - 1
+        m = (c >= g.start_um) & ((c <= g.stop_um) if last else (c < g.stop_um))
+        v[m] = g.x_start + (g.x_stop - g.x_start) * (c[m] - g.start_um) / (g.stop_um - g.start_um)
+    return v
+
+
+def set_grading(problem: Problem, region: str) -> None:
+    """A23.2: with more than one grading term, their mole fraction at every node as a node solution."""
+    gr = problem.device.grading
+    if len(gr) < 2:
+        return
+    from devsim import get_node_model_values, node_solution, set_node_values
+    coord = np.asarray(get_node_model_values(device=DEVICE, region=region, name=gr[0].axis), float) / UM
+    node_solution(device=DEVICE, region=region, name=GRADE_SOLUTION)
+    set_node_values(device=DEVICE, region=region, name=GRADE_SOLUTION,
+                    values=[float(a) for a in grade_values(gr, coord)])
+
+
 def grade_expression(g: GradeTerm) -> str:
     c, c0, c1 = g.axis, g.start_um * UM, g.stop_um * UM
     return (f"step({c} - {_num(c0)})*step({_num(c1)} - {c})*({_num(g.x_start)} + "
@@ -133,6 +164,7 @@ def physics_from(problem: Problem):
     from simws.tcad.physics import Physics
     m = problem.models
     g = problem.device.grading[0] if problem.device.grading else None
+    ge = (grade_expression(g) if len(problem.device.grading) == 1 else GRADE_SOLUTION) if g else None
     return Physics(
         T=m.temperature_K, fermi_dirac=m.statistics == "fermi_dirac",
         mobility="klaassen" if m.mobility == "klaassen" else "masetti",
@@ -146,7 +178,9 @@ def physics_from(problem: Problem):
         ii_N_crit=m.ii_critical_doping_cm3, ii_E_const=m.ii_energy_eV,
         donor_species=m.donor_species, acceptor_species=m.acceptor_species,
         extended_precision=m.extended_precision,
-        ge=grade_expression(g) if g else None, ge_mode=g.mode if g else "strained")
+        ge=ge, ge_mode=g.mode if g else "strained",
+        hole_recombination_velocity={c.name: c.hole_recombination_velocity_cm_s for c in problem.device.contacts
+                                     if c.hole_recombination_velocity_cm_s is not None})
 
 
 # ------------------------------------------------------------------------------------------ mesh
@@ -271,6 +305,7 @@ def _build(problem: Problem) -> _State:
     reset_devsim()
     (_mesh_1d if dev.dimension == 1 else _mesh_2d)(problem, region)
     set_profiles(problem, region.name)
+    set_grading(problem, region.name)
     net, tot = doping_expressions(problem)
     phys = physics_from(problem)
     num = problem.numerics

@@ -2640,3 +2640,310 @@ Ghante et al. 1995 (A21), and implant damage in the anneal (A22).
    600 C, 3.6e2 at 1100 C, E_S 1.20 eV from raw pixels against 1.2227 from the rounded values; Rp_ref re-run:
    59.020 nm). Reported: with E_tau = 3.8 eV anchored at 40 s / 815 C, tau(670 C) is 5.6 h against Stolk's "about
    4 h" (his two decay times alone imply about 3.6 eV, inside his +- 0.2).
+
+### A20, A21 and A22, laptop run (24 Nov 2026)
+
+Update 13 on the owner's laptop, committed as b7aaadf on arch/v1; master in ~/sim_workspace fast-forwarded. Fast
+tests 2076 passed, 32 skipped, 9 xfailed (11 min 45 s). Crystal-chain and phosphorus acceptance 163 passed, 16
+skipped; TED acceptance 41 passed, 3 skipped. Identical to the build machine: R130 (B +0.0008 %, As -0.0020 %), R131
+(0.0013 %, 0.0007 %), R132 (B 490.76 / 431.29 nm, As 326.32 / 179.90 nm), R133 bands and diodes, R140 to R143 (R142
+5e14: peak 0.932, depth +14.22 % against 15 %), R145 (442.86 nm), R150 (-8.9 % and -11.0 % with TED, -21.8 % and
+-21.5 % without; shift ratios 0.594 and 0.496), R151 (0.0517 %, 0.0018 %), R152 (0.023 %; tau(670 C) 5.64 h), R153
+(900 C 10 s 422.5 -> 431.0 nm). The R150 DEVSIM TED result is "validated"; the FiPy one "verified".
+
+### A23 (24 Nov 2026, lead): validation data for the IBM 5AM SiGe HBT, and the 5AM device at 300 K
+
+The owner chose validation against measurement over new features (the plan "simws validation plan: IBM 5AM SiGe
+HBT", 24 Nov 2026: one device, the IBM 5AM, in A23 to A29; each stage fits at most three named knobs to one
+dataset and is judged on data it did not see). A23 stores the data and builds the device; A24 runs it cold.
+
+0. **What the lead had seen.** (i) J. A. Pellish, PhD thesis, Vanderbilt, Dec 2008 (free copy, SHA-256 in the data
+   file): Fig. 3, Gummel and beta of a 0.5 x 2.5 um^2 5AM HBT (peak beta about 165 near VBE 0.62 V; beta about 125
+   at 0.8 V); Fig. 4, forced-IB output curves (IC about 0.78 mA at IB 6 uA and 1.35 mA at 12 uA; a rise from about
+   3 V). (ii) L. Luo, PhD thesis, Auburn, 2011 (free copy): the device is a 5AM 0.5 x 2.5 um^2 HBT (his Figs. 6.53,
+   7.3); Fig. 1.1 cross section; Fig. 1.2 SIMS of As, B, P and Ge with **no numbers on the depth axis** (Ge peak
+   about 0.098, B peak about 2.5e18 cm^-3, collector P about 5e17); Fig. 4.1 intrinsic base sheet resistance vs T
+   (about 1.4e4 ohm/sq at 300 K, rising steeply below about 100 K); Fig. 4.2 M-1 vs VCB at a small forced VBE,
+   43 to 300 K; Fig. 4.7 beta vs VBE at VCB = 0, 43 to 300 K (peak about 130 near 0.77 V at 300 K, about 190
+   near 1.03 V at 93 K); Fig. 5.7 IC vs VBE, 43 to 393 K, and his extracted ideality (1 above about 200 K, 1.35 at
+   43 K; "default Mextram fails below 110 K"); Fig. 3.7(a) fT vs JE at 300 K (peak about 47 GHz near 1 mA/um^2;
+   the colder panels have no numbers on their fT axis); Fig. 6.38, an extracted RE of order 10 ohm. (iii) Sutton
+   thesis (Georgia Tech 2009) section 2.4.2 and Table 2 (the SiGe film: 10-20 nm buffer, 70-100 nm boron layer,
+   10-30 nm cap; effective emitter width 0.42 um), Fig. 72 (pre-irradiation 77 K and 300 K Gummel of a 0.5 x 1.0
+   5AM). (iv) Cressler et al. 2001 Table I (beta 115, VA 60 V; another lot); Lourenco thesis Table 6.1 (BVCEO 3.3 V,
+   BVCBO 10.5 V). The two chips' peak beta differ by about 25 % (Pellish 165, Luo 130). No 5AM simulation had been
+   run when items 0 to 6 were committed.
+1. **Data** (`simws/data/validation/`). One JSON file per source (`pellish2008.json`, `luo2011.json`,
+   `sutton2009.json`), each with the source's citation and the PDF's SHA-256, and per figure: the traced points with
+   units, the axis calibration, the method (`vector`: read from the PDF's drawing operators, the axes calibrated on
+   the tick marks in the same stream; or `raster`: tools/digitise as A21), and the trace error (vector: the line
+   width; raster: as A21). Every trace is checked on an overlay of the page. Noisy SIMS traces carry the floor below
+   which points are not used. `catalog.json` lists every dataset of the plan (paper, figure, device, conditions,
+   role: "calibration", "validation", "trend" or "input"). `simws.validation.catalog`: `load(dataset)` and
+   `ingest(hub, dataset)` (`simws.measured.ingest` with the catalog's role as the label; trend and input datasets
+   are refused).
+2. **Device** (`simws.spec.library.ibm5am_hbt(s_um, k_B, k_E, L_um=2.5, T=300.0, VBE=None, VCB=0.0, ...)`). A 2D
+   half cell (x = 0 is the symmetry plane through the emitter's centre; currents x 2 x L), x from 0 to 1.2 um, y
+   from the top of the monocrystalline emitter (Luo's dashed poly/mono line). Doping: Luo Fig. 1.2 traced, every
+   depth u of the figure (0 to 1 across the axis) placed at y = s_um (u - u_poly); As (x <= 0.21 um only, x k_E) as
+   the emitter; B (x k_B) as the base, across the cell; P as the collector; the buried As held at its last traced
+   value for 0.5 um below the trace, to the collector contact on the bottom. Ge from the traced Ge curve (linear
+   GradeTerms between its points). Extrinsic base: acceptors 1e20 for x >= 0.36 um (a 0.15 um spacer) down to the
+   depth where the traced B falls below 1e17 on the collector side. Contacts: emitter on top over x <= 0.21 um
+   (ohmic, the poly is not modelled), base on top over x >= 0.8 um, collector on the bottom. Physics, at every
+   temperature (A24 changes only T): Fermi-Dirac, Klaassen mobility, Altermatt incomplete ionization, SRH
+   "scharfetter", Auger, Slotboom; impact ionization (van Overstraeten) only where an item says so. Flags:
+   `device:5am_reconstruction: depths of Luo Fig. 1.2 scaled by a fitted s; lateral layout chosen by the lead`
+   and `device:no_parasitic_resistance: no poly emitter, no RE, no external RB, RC`.
+3. **Knobs (three, fitted together).** s_um (micrometres per unit of Fig. 1.2's depth axis; 0.3 to 1.2), k_B (0.5
+   to 2), k_E (0.3 to 3). The fit: least squares in log10 of IC (Luo Fig. 5.7a, 300 K, VBE 0.60 to 0.78 V), IB =
+   IC / beta (Fig. 4.7, 300 K, VBE 0.70 to 0.78 V) and RsBi (Fig. 4.1 at 300 K), each set weighted equally. RsBi of
+   the model: 1 / (q integral of mu_p p dy) over the equilibrium solution of the vertical cut at x = 0, between the
+   two metallurgical junctions, mu_p and p from the device's own models. Stored in
+   `simws/data/validation/ibm5am_calibration.json` with the residuals. Above 0.78 V the emitter resistance (not
+   modelled; about 10 ohm x IE) moves VBE by more than 1.5 mV: those points are reported, not fitted or gated.
+4. **Acceptance (tolerances fixed here, before any 5AM run).**
+   R160 (data): every dataset of the catalog loads, has a source, units and a role; the files' SHA-256 match the
+   PDFs the lead read; `ingest` labels as the catalog says and refuses trend and input datasets.
+   R161 (the fit, calibration data): IC within 15 % at every traced VBE in 0.60-0.78 V; IB within 20 % in
+   0.70-0.78 V; RsBi(300 K) within 10 %.
+   R162 (another chip, Pellish Fig. 3, held out): IC within 25 % at every traced VBE in 0.60-0.78 V. Reported:
+   IB and beta (the chips' beta differ by about 25 %: item 0).
+   R163 (Early voltage, Pellish Fig. 4, held out): V_A = IC / slope from a straight line through the traced IC
+   over VCE 0.6 to 2.0 V at IB 6 and 12 uA; the model's V_A (the same fit over the same VCE at the VBE that gives
+   that IB at VCE 1 V) within a factor 1.5.
+   R164 (avalanche, Luo Fig. 4.2 at 300 K, held out): impact ionization on, VBE fixed where IC is 10 uA at VCB 0:
+   M - 1 = (IB(0) - IB(VCB)) / IC(VCB) at VCB 2, 3, 4 and 5 V within a factor 2.
+   R165 (fT, Luo Fig. 3.7a, held out): small signal at VCB 0 V, fT = f |h21| at 2 GHz: the peak fT within 25 %;
+   the JE at the peak within a factor 2.
+   R166 (mesh): IC and IB at VBE 0.70 V change by less than 3 % with mesh scale 0.5.
+   R167 (reported): IC at 0.60 and 0.65 V next to the generalized Moll-Ross / Kroemer integral of the vertical cut
+   (`simws.validation.sige_checks`), x the emitter width; the SiGe film the fitted s implies (Ge above 1 %) next to
+   Sutton's 90 to 150 nm.
+   R168 (refusals and ids): knobs outside their ranges refused ("device:"); the problem id fixed by the knobs, L
+   and T; a changed data file changes the id.
+   R169 (trust): the 300 K results whose comparisons R162 to R165 pass become "validated" once those comparisons
+   are recorded against the ingested "validation" data; R161 is recorded against "calibration" data and validates
+   nothing; a failed comparison keeps a result below "validated".
+5. **Trust.** One engine (Charon has no grading): no engine pair. "Validated" only through R169.
+6. **Not in A23.** Strikes, dose, substrate and deep trench (A25 to A27), the poly emitter and parasitic
+   resistances, self-heating, 3D effects.
+7. **Clarifications by the lead during development, before the checker (24 Nov).**
+   (a) **Tracing.** Every figure is vector: the data are the plotted paths' vertices read from the PDFs' drawing
+   operators, the axes calibrated on tick marks in the same stream (`tools/digitise/vector.py`,
+   `tools/digitise/trace_5am.py`, which writes the three data files); every trace checked on an overlay. Read
+   while tracing: Pellish Fig. 3's peak beta is 157 at 0.62 V (item 0's "about 165" was by eye); at 1 uA the two
+   chips' VBE agree within 2 mV (Pellish 0.700 V, Luo 0.698 V). Luo Fig. 1.2: the depth axis has 8 equal tick
+   intervals; the Ge film (Ge > 1 %) spans 1.10 of them (110 nm at 0.1 um per interval); the poly / mono line is
+   at u = 0.0484; the As trace ends at u = 0.075 at 2.3e20 cm^-3. Fig. 5.7(a)'s twelve curves are named by Fig.
+   5.7(b)'s markers (393, 300, 262, 223, 192, 162, 136, 110, 93, 76, 60, 43 K). Fig. 4.1: the legend's own marker
+   is excluded. Fig. 4.2: the 43 K curve is flat above about 3 V (Luo: instability). Fig. 3.7(a): the fT axis has
+   no tick marks in the stream and is calibrated on its labels. Sutton Fig. 72: each curve is drawn one segment
+   per path; the segments are chained.
+   (b) **Engine.** A23.2's Ge needs several grading terms: the DEVSIM translator now takes several, in order, not
+   overlapping, of one element, axis and mode, evaluated at the nodes into a node solution; one term is
+   translated as before (no id or result changes).
+   (c) **Emitter.** A tabulated profile cannot be confined laterally, so the emitter is a box (x <= 0.21 um, from
+   the poly / mono line to the trace's end) at the trace's mean concentration there x k_E.
+   (d) **Mesh.** The first mesh (0.5 nm at the emitter edge in depth, 2 nm laterally) took 330 s for 5 Gummel
+   points; it was coarsened before the fit (1 nm, 4 nm). Between the two meshes at the start knobs the lead saw IC
+   1.5 % and IB 5 % apart (R166's quantity, on another pair of meshes).
+   (e) **RsBi** is computed from the engine's equilibrium state, not as a hub quantity: R161's and R172's RsBi
+   comparisons are in the tests and not recorded in the hub; R169's records are the IC curves.
+   (f) **R164 and R173, method changed.** Impact ionization in the coupled solve did not converge at equilibrium on
+   this device (with the source added before the equilibrium solve, and with it added after; the second change
+   was tried and reverted). M - 1 is computed instead as the electron-initiated multiplication along the cut
+   x = 0, from the base's most p-type point through the collector junction: 1 - 1/M = integral alpha_n
+   exp(-integral (alpha_n - alpha_p)) dy, van Overstraeten-de Man at T (`simws.tcad.models.alpha_numpy`), on the DC
+   solution without impact ionization (IC has no avalanche feedback). While debugging it the lead saw R164's
+   numbers on a device near the final knobs (s 0.82, k_B 0.63, k_E 2.78): model M - 1 at VCB 0 to 5 V 7.8e-6,
+   0.0023, 0.021, 0.075, 0.176, 0.34; measured at 1 to 5 V 1.2e-4, 0.0022, 0.019, 0.076, 0.19. (The lead first
+   read them one VCB step out of line, as agreement; corrected after the demo's R164 line: the model at 2 V is
+   0.021, about 10 x the measurement.) The tolerance is unchanged.
+   (g) **The fit** (R161's quantities seen): 13 evaluations of five Gummel points (0.60, 0.66, 0.70, 0.74, 0.78 V)
+   with the equilibrium RsBi; it stopped on its step tolerance at s 0.8256 um, k_B 0.6256, k_E 2.7842 (103 nm per
+   tick interval; a 114 nm SiGe film). IC 1.22 to 1.09 x the measurement from 0.60 to 0.78 V, IB 1.54 to 1.64 x,
+   RsBi 0.89 x. k_E moves IB little (d log IB / d log k_E about -0.2): an ohmic contact at the poly / mono line
+   (the poly emitter not modelled, item 2's flag) gives an emitter-side base current that k_E's range cannot bring
+   down to the measured one. RsBi and IC pull k_B opposite ways (less boron raises RsBi toward the measurement and
+   IC away from it): the SiGe hole mobility, provisional in simws, is the first suspect. Recorded, not refitted.
+   (h) JE (R165) and JC (R174) are over the drawn emitter area, 0.5 x L.
+   (i) fT bias points (R165): VBE 0.80 to 0.98 V in 20 mV steps, VCB 0.
+   (j) **The public functions** (for the checker): `simws.validation.catalog`: `catalog()`, `entry(id)`,
+   `role(id, T_K=None)` (a figure's curve at 300 K can be "calibration" while the others are "validation"),
+   `load(id, T_K=None)` / `curve(...)` (arrays; `figure(id)` the raw block and the source), `ingest(hub, id,
+   axis=(name, key, unit), columns={quantity: (key, unit)}, T_K=None, rows=None)`. Dataset ids: luo2011.fig1_2,
+   .fig5_7a, .fig4_7, .fig4_1, .fig4_2, .fig3_7a; pellish2008.fig3, .fig4; sutton2009.fig72 (traced), and the
+   later stages' rows (no file). `simws.spec.library`: `ibm5am_hbt(...)` (item 2), `ibm5am_scale(L_um)` (cm of
+   depth -> one device), `IBM5AM_RANGES`. `simws.validation.ibm5am`: `knobs()` (the stored calibration),
+   `gummel(k, VBE, T=300, L_um=2.5, VCB=0, mesh_scale=1)` -> VBE_V, IC_A, IB_A (one device), RsBi_ohm_sq;
+   `rsbi(k, T)`; `early_voltage(k, IB_target_A)`, `early_voltage_measured(IB_uA)`; `avalanche(k, T=300,
+   VCB=(...), VBE_guess=None)` -> M_minus_1 per VCB; `ionization_integral(y_cm, E_Vcm, T)`; `ft_curve(k, VBE)` ->
+   VBE_V, JE_mA_um2, fT_GHz; `moll_ross(k, VBE)`; `luo_targets(T)`, `gummel_window(T)`, `vbe_at_current(V, I,
+   target)`; `fit()` (writes the calibration file; slow). `tools/v1_5am_demo.py --part a23|a24` prints the R
+   lines. `simws.engines.devsim_engine.grade_values(grading, coord_um)` (item (b)).
+
+### A24 (24 Nov 2026, lead): the 5AM device from 77 K to 393 K, nothing refitted
+
+0. **What the lead had seen.** As A23.0; in particular Luo's beta peaks (item 0 (ii)) and his statement that the
+   IC slope departs from ideal below about 200 K; Sutton Fig. 72. No cold 5AM run when committed.
+1. **Runs.** A23's device with its stored knobs, unchanged, at 393, 223, 162, 93 K (Luo's temperatures) and 77 K
+   (Sutton's), plus 43 K reported. Same models (A23.2); the engine's extended precision below 200 K.
+2. **Acceptance (tolerances fixed here, before any cold run).**
+   R170 (IC, Luo Fig. 5.7a): VBE at IC = 1 uA and at 100 uA within 20 mV of the trace, at 393, 223, 162 and 93 K.
+   R171 (beta, Luo Fig. 4.7): the peak beta within 30 % at 223 and 162 K and within a factor 2 at 93 K. Reported:
+   the VBE of the peak.
+   R172 (base sheet resistance, Luo Fig. 4.1): RsBi within 30 % at 223, 162 and 100 K and within a factor 2 at 75 K;
+   reported down to the trace's lowest temperature (incomplete ionization).
+   R173 (avalanche, Luo Fig. 4.2): A23's R164 at 162 and 93 K, VCB 2, 3 and 4 V, within a factor 2.
+   R174 (another chip, Sutton Fig. 72, pre-irradiation, 0.5 x 1.0 um^2, L_um 1.0): VBE at JC = 10 nA/um^2 within
+   30 mV of the trace at 300 K and at 77 K.
+   R175 (reported): 43 K (or its failure category); the model's IC ideality next to Luo's (Fig. 5.7b) at 93 and
+   43 K.
+3. **Trust.** As A23.5: each temperature's result is "validated" when its comparisons pass and are recorded.
+4. **Expected trouble.** Below about 110 K, base current gains a non-ideal part (Luo: trap-assisted tunnelling)
+   that drift-diffusion does not hold; a FAIL there is recorded, not tuned away.
+
+### A23 and A24, build-machine results (24 Nov 2026, before the checker)
+
+`tools/v1_5am_demo.py`, stored knobs s 0.8256 um, k_B 0.6256, k_E 2.7842.
+- R161 (calibration): IC 1.217 to 1.095 x (FAIL at 0.60 to 0.66 V, 15 %); IB 1.54 to 1.64 x (FAIL, 20 %); RsBi
+  12739 against 14284 ohm/sq, 0.892 (FAIL, 10 %).
+- R162 (Pellish's chip): IC 1.198 to 1.305 x (FAIL at 0.60 to 0.70 V, 25 %); IB 2.03 to 2.08 x, model beta 86 to 98
+  (reported).
+- R163: V_A 28.2 V against 140.1 V (IB 6 uA) and 30.3 against 268.7 V (12 uA): 0.20 and 0.11 (FAIL, factor 1.5).
+- R164: M - 1 at 2, 3, 4, 5 V: 0.0209, 0.0735, 0.173, 0.336 against 0.00222, 0.019, 0.0764, 0.19: 9.4, 3.9, 2.3, 1.8
+  (FAIL at 2 to 4 V, factor 2).
+- R165: peak fT 59.6 GHz at 1.22 mA/um^2 against 46.9 GHz at 0.94: +27 % (FAIL, 25 %); JE within a factor 2 (pass).
+- R166: mesh scale 0.5 at 0.70 V: IC -1.52 % (pass), IB -15.9 % (FAIL, 3 %): the base current, and so k_E, is not
+  mesh-converged.
+- R167 (reported): IC / Moll-Ross 0.789 and 0.754 at 0.60 and 0.65 V; SiGe film 114 nm.
+- R170: VBE at 1 uA / 100 uA: 393 K -8.7 / -6.2 mV, 223 K -4.0 / -2.6 mV, 162 K +6.2 / +4.9 mV (pass, 20 mV);
+  93 K no converged solution (FAIL; the equilibrium solve fails within 36 s, also with 20 mV steps).
+- R171: peak beta 0.728 x at 223 K (pass, 30 %), 0.981 x at 162 K (pass); 93 K no result (FAIL).
+- R172: RsBi 0.925 x at 223 K, 0.874 x at 162 K (pass, 30 %); 100 K and 75 K no result (FAIL).
+- R173: M - 1 at 162 K: 0.0513, 0.147, 0.314 against 0.00495, 0.0398, 0.13 (FAIL); 93 K no result (FAIL).
+- R174: Sutton 300 K +1.1 mV (pass, 30 mV); 77 K no result (FAIL).
+- R175: 43 K no result.
+
+What the numbers say. The collector current and its temperature dependence hold from 393 to 162 K within 9 mV,
+with three knobs fitted at 300 K only, and Sutton's other chip at 300 K within 1 mV. The rest points at three
+gaps: (1) the base-collector side of the rebuilt profile: V_A 5 to 9 x too low and avalanche at 2 to 3 V 4 to 10
+x too strong both say the base-collector junction is too abrupt or the collector too heavily doped there (the
+traced boron tail and collector phosphorus near the junction); (2) the emitter: the base current is neither
+mesh-converged (-16 %) nor reachable with k_E (no poly emitter); (3) the solver below about 100 K on this device.
+
+### A23b (24 Nov 2026, lead): the 5AM device revised (poly-emitter contact, collector phosphorus, mesh)
+
+The owner chose to fix the device before shipping (A23, A24 and A23b go in one update). A23's knobs, data,
+tolerances and hold-outs stay; what changes is the device, its knobs and its mesh.
+
+0. **What the lead had seen** (beyond A23.0 and A23.7): every A23 / A24 build-machine result above. Diagnostics:
+   at 93 K the equilibrium converges with Boltzmann statistics and fails with Fermi-Dirac at the fitted emitter
+   (N_E = 1.78e21 cm^-3, k_E 2.78), with or without incomplete ionization, Klaassen, SRH / Auger or BGN; with the
+   emitter at the trace's mean (k_E = 1, 6.4e20) Fermi-Dirac converges at 93 and 77 K (43 K: a root bracket fails
+   in the contact equilibrium). Mesh at the A23 knobs, VBE 0.70 V: IB -7.1 % at scale 0.7 and -15.9 % at 0.5 (IC
+   -1.1 %, -1.5 %). BVCBO 10.5 V (Lourenco Table 6.1) against the traced collector phosphorus next to the base
+   (about 3.8e17 cm^-3): an abrupt one-sided junction at 3.8e17 breaks down near 4 V, at 1e17 near 10.7 V. The
+   new contact's closed-form check below (item 1), run before this was written.
+1. **Engine: a finite hole recombination velocity at an ohmic contact.** `Contact.hole_recombination_velocity_cm_s`
+   (> 0, ohmic contacts only; None = ohmic, and absent from the description so no id changes). DEVSIM: the hole
+   equation at that contact keeps the bulk flux and adds q S (p - p_eq) per unit contact area (a contact node
+   model is integrated over the node's volume, so the flux is divided by it). Charon refuses it. Closed form
+   (1D p+ n diode, NA 1e20 / ND 1e17, n side 2 um, no recombination, constant mobility, Boltzmann, no BGN, 0.5 V):
+   J_p = q p_n0 (e^{V/Vt} - 1) / (W'/D_p + 1/S), W' the neutral n width. Seen: model / closed form 1.0000,
+   0.9999, 0.9992, 0.9968 at S = 1e2, 1e3, 1e4, 1e5 cm/s; at 1e8 the ohmic result within 0.05 %; ohmic 0.9951 (the
+   closed form's depletion edge); the same diode in 2D gives the 1D currents to five digits.
+2. **Device.** `ibm5am_hbt(..., k_P=1.0, S_p=None)`: k_P multiplies the traced collector phosphorus; S_p (cm/s) is
+   the emitter contact's hole recombination velocity (the poly emitter's effective contact). A23b fixes s_um =
+   0.80 (0.1 um per tick interval of Luo Fig. 1.2: the 110 nm Ge film of A23.7(a) and Sutton's 90 to 150 nm; A23's
+   fit gave 0.826) and k_E = 1 (the emitter at the trace's mean). Mesh: the lead refines the mesh around the
+   emitter before the fit until IB at 0.70 V changes by less than 3 % at mesh scale 0.5 (at the start knobs).
+3. **Knobs (three, fitted together).** k_B (0.5 to 2), k_P (0.1 to 2), S_p (1e3 to 1e7 cm/s, fitted in log10).
+   Data: A23.3's three sets (Luo 300 K IC, IB, RsBi) and BVCBO = 10.5 V (Lourenco Table 6.1, from Ahlgren et al.
+   1997; a table value, weighted as one set). Model BVCBO: emitter and base at 0 V, collector swept; the voltage
+   where 1 - 1/M of A23.7(f)'s integral on the cut x = 0 reaches 1 (interpolated). Stored in
+   `ibm5am_calibration.json` (A23's calibration kept in the file's history in git).
+4. **Acceptance.** A23.4's R161 to R169 and A24's R170 to R175, re-run with the A23b device, the same tolerances.
+   New: R180 (the contact, closed form: model / closed form within 1 % at S = 1e2 to 1e5 cm/s; S = 1e8 equals the
+   ohmic contact within 0.5 %); R181 (the same diode in 2D gives the 1D current within 0.1 %); R182 (refusals and
+   ids: S <= 0 and S on a schottky contact refused; Charon refuses it; every library problem without S keeps its
+   id); R183 (calibration: model BVCBO within 10 % of 10.5 V).
+5. **Kept as history.** A23's device results above stay in this contract; the tests test the A23b device.
+6. **Clarifications by the lead during development, before the checker (24 Nov).**
+   (a) **Mesh.** With the A23b emitter (k_E 1, the contact's S_p) the mesh of A23 already meets item 2: at the
+   start knobs (k_B 0.63, k_P 0.3, S_p 3e4 cm/s) and 0.70 V, mesh scale 0.5 moves IB +1.5 % and IC -1.4 % (beta 297
+   at that S_p). The A23 sensitivity came from the 1.78e21 emitter at an ohmic contact. The mesh is unchanged.
+   (b) **BVCBO.** Item 0's estimate (an abrupt junction at 3.8e17 breaks down near 4 V) was wrong for this graded
+   profile: the model (item 3) gives 11.77 V at k_P = 1 and 15.86 V at k_P = 0.3 (k_B 0.63, S_p 3e4). k_P is
+   therefore not expected to fix A23's low-voltage avalanche (R164) or V_A (R163), which depend on the field near
+   the junction at low bias. The knob stays as committed.
+   (c) The fit runs the Gummel sweep and the BVCBO ramp (1 V steps) of each evaluation in two processes; its
+   start: k_B 0.63, k_P 1.0, S_p 1e5 cm/s.
+   (d) Public functions added: `simws.validation.ibm5am.bvcbo(k, T=300, V_max=20, step=0.5)` -> BVCBO_V,
+   `fit_b()`, `A23B_FIXED`, `BVCBO_MEASURED_V`; knob dicts carry k_P and S_p (cm/s); `knobs()` returns them when
+   the calibration file has them; `ibm5am_hbt(..., k_P=1.0, S_p=None)`.
+
+### A23, A24, A23b: the checker's report and the lead's answers (24 Nov 2026)
+
+The checker wrote `tests/v1/test_validation_5am.py` from the contract alone (fast tier: R160, R168, R180 to R182
+and unit checks of the pure functions; slow tier: R161 to R175, R183). Its first fast run: 32 passed, 2 failed.
+- **Fixed (the code was wrong).** (1) Ingesting `luo2011.fig4_1` (one series over temperature) labelled every point
+  with one role, so the 300 K calibration point went in as "validation" (or all 27 as "calibration"):
+  `catalog.ingest` now ingests, with T_K, only that temperature's points under its role, and without T_K only the
+  points of the default role. (2) `ibm5am_hbt(k_P != 1, S_p=None)` failed while writing its description. (3)
+  `ingest` of a per-temperature figure without T_K, and `load` of `pellish2008.fig4` with T_K, now refuse with a
+  ValueError (they raised KeyError / AttributeError). After the fixes: 34 passed.
+- **The checker's readings, accepted.** "Within x %" = |model / measured - 1|; "a factor F" = the larger of the
+  two ratios; "at every traced VBE" = the trace's own points in the window, the model interpolated in ln I. R163:
+  V_A = intercept / slope of the straight line (the lead's `early_voltage_measured` uses IC(1.3 V) / slope, 1.3 V
+  more; the verdict is the same). R180 is gated on the cathode current, where S acts, with the p side's electron
+  term added to the closed form (at most 1 %). R169: the model IC scaled x 2L to one device before the comparison.
+  `ionization_integral` returns M - 1. `grade_values`: half-open terms, the last closed (A23.7(b), stated now).
+- **Noted, not changed.** In R180's diode at S = 1e2 cm/s the anode current is 1.6 % below the cathode's: the
+  anode sits in 1e20 holes, and the tiny current (about 1e-7 A/cm^2) is below the solver's absolute resolution
+  there; the cathode current matches the closed form within 0.3 %. Not tested: R167's Moll-Ross integral
+  independently, the model's M - 1 independently (the field on the cut is not public), A24.3's per-temperature
+  trust labels (no hub tolerance for VBE shifts), refusals of overlapping grading terms (no wording; the engine
+  refuses them, A23.7(b)).
+
+### A23b, build-machine results (24 Nov 2026)
+
+**The fit (A23b.3).** `fit_b` from k_B 0.63, k_P 1.0, S_p 1e5 cm/s; 25 evaluations (7 optimizer steps, xtol),
+about 3.2 min each with two workers. Result: **k_B 0.681, k_P 1.822, S_p 6.24e5 cm/s** (s 0.80 and k_E 1 fixed);
+residuals (log10) IC 0.069 / 0.053 / 0.045 / 0.030 / 0.024 at 0.60 / 0.66 / 0.70 / 0.74 / 0.78 V, IB -0.014 /
+0.000 / +0.013 at 0.70 / 0.74 / 0.78 V, RsBi -0.034; BVCBO 10.15 V. All knobs inside their ranges.
+
+**The checker's slow tier on that calibration** (1 h 59 min on the build machine): 17 passed, 10 failed.
+- R161 FAIL: IC / Luo 1.053 to 1.175 (worst 17.5 %, limit 15 %, at the low-VBE end); IB / measured 0.968 to 1.031
+  (A23: 1.54 to 1.64), RsBi 0.924 (A23: 0.892): both within their limits now.
+- R162 FAIL: IC / Pellish 1.152 to 1.257 (limit 25 %; A23 30.5 %). Reported: IB / Pellish 1.28 to 1.33.
+- R163 FAIL: V_A 22.3 / 23.9 V against 138.8 / 267.4 V (A23: 28 / 30 V).
+- R164 FAIL: M - 1 factors 21.9, 7.3, 3.8, 2.8 at VCB 2 to 5 V (A23: 9.4, 3.9, 2.3, 1.8). R173 FAIL, the same at
+  162 K (20.3, 6.2, 3.8) and 93 K (16.0, 5.1, 3.1).
+- R165 FAIL: peak fT 69.7 GHz at 1.24 mA/um^2 against 46.9 GHz at 0.94 (+48 %; A23 +27 %).
+- R166 pass: IC -1.50 %, IB -0.70 % at mesh scale 0.5. R167 reported: IC / Moll-Ross 0.78 (0.60 V), 0.75 (0.65 V).
+- R169 pass (the 300 K result stays unverified after both failed comparisons). R183 pass: BVCBO 10.15 V (-3.4 %).
+- R170 pass at all four temperatures: -7.3 / -5.0 mV (393 K), -3.3 / -2.0 (223 K), +6.7 / +5.5 (162 K),
+  +18.5 / +12.2 mV (93 K; A23 had no converged solution there).
+- R171 pass: 0.905 (223 K), 0.785 (162 K), factor 1.72 at 93 K (new). R172 pass at 223 K (0.969) and 162 K (0.913);
+  FAIL at 100 K (0.468) and 75 K (0.290, factor 3.4 > 2); reported 70 K 0.263, no solution from 60 K down.
+- R174 pass: +2.1 mV (300 K), +13.5 mV (77 K, new). R175 reported: 93 K ideality 1.06 (Luo 1.23); 43 K no solution.
+
+**What the numbers say.** A23b fixed what it was for: the base current (the emitter's hole sink) and the cold runs
+down to 77 to 93 K. What fails now has one cause in two places. (1) The base-collector junction: to reach BVCBO
+10.5 V the fit raised the collector phosphorus (k_P 1.8), which makes the junction field steeper at low VCB (M - 1
+too large by a factor 3 to 22, falling with VCB), and the base too lightly doped and too narrow to hold the Early
+voltage (V_A a factor 6 to 11 low; k_B 0.68 is the fit trading base charge for IC). The SIMS trace has no depth
+scale (A23.2: 0.1 um per tick from the Ge film), so the base width and the collector profile's slope are the weakest
+parts of the reconstruction; a depth-scaled 5AM / 5HP profile is what would pin them. (2) The fT peak is too high
+for the same reason (a thin base and a short collector transit). Below 100 K the model's base sheet resistance rises
+far too slowly (0.47 at 100 K): boron freeze-out in the 1e19 base with Altermatt's model at this doping is weaker
+than Luo measures. These are recorded as xfail(strict=True) with these numbers; no tolerance changed.
+
+**The full fast suite after A23b** (tests/v1, tests/connections): 3 failures in older tests, all from A23, fixed.
+(1, 2) R97's and R107's id checks call every library function whose arguments all have defaults: `ibm5am_scale`
+had a default L_um (2.5) and returns a number, not a problem. L_um is now required (every caller passes it).
+(3) `test_unsupported_two_grade_terms` (written before A23) expected any second grading term to be refused; A23.7(b)
+allows ordered, non-overlapping terms, so the test now checks the refusal A23.7(b) keeps (overlapping terms). The
+lead should have run the whole fast suite before recording A23; it is run before every update from now on.

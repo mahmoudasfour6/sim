@@ -1,0 +1,262 @@
+{
+ "plan": "simws validation plan: IBM 5AM SiGe HBT (24 Nov 2026); A23.1",
+ "roles": {
+  "calibration": "fitted to; validates nothing",
+  "validation": "held out; a passed comparison can validate",
+  "trend": "sign and rough size only; never ingested",
+  "input": "builds the device; never compared"
+ },
+ "datasets": [
+  {
+   "id": "luo2011.fig1_2",
+   "stage": "A23",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 1.2",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "SIMS As, B, P, Ge; no depth numbers",
+   "role": "input",
+   "file": "luo2011.json",
+   "key": "fig1_2"
+  },
+  {
+   "id": "luo2011.fig5_7a",
+   "stage": "A23, A24",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 5.7(a)",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "IC vs VBE, 43 to 393 K",
+   "role": "validation",
+   "file": "luo2011.json",
+   "key": "fig5_7a",
+   "curve_roles": {
+    "300.0": "calibration"
+   }
+  },
+  {
+   "id": "luo2011.fig4_7",
+   "stage": "A23, A24",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 4.7",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "beta vs VBE, VCB 0, 43 to 300 K",
+   "role": "validation",
+   "file": "luo2011.json",
+   "key": "fig4_7",
+   "curve_roles": {
+    "300.0": "calibration"
+   }
+  },
+  {
+   "id": "luo2011.fig4_1",
+   "stage": "A23, A24",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 4.1",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "intrinsic base sheet resistance vs T",
+   "role": "validation",
+   "file": "luo2011.json",
+   "key": "fig4_1",
+   "curve_roles": {
+    "300.0": "calibration"
+   }
+  },
+  {
+   "id": "luo2011.fig4_2",
+   "stage": "A23, A24",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 4.2",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "M - 1 vs VCB, small forced VBE, 43 to 300 K",
+   "role": "validation",
+   "file": "luo2011.json",
+   "key": "fig4_2"
+  },
+  {
+   "id": "luo2011.fig3_7a",
+   "stage": "A23",
+   "paper": "Luo 2011 PhD thesis (Auburn)",
+   "read_from": "Fig. 3.7(a)",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2",
+   "conditions": "fT vs JE, 300 K",
+   "role": "validation",
+   "file": "luo2011.json",
+   "key": "fig3_7a"
+  },
+  {
+   "id": "pellish2008.fig3",
+   "stage": "A23",
+   "paper": "Pellish 2008 PhD thesis (Vanderbilt)",
+   "read_from": "Fig. 3",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2 (another chip)",
+   "conditions": "Gummel and beta, 300 K",
+   "role": "validation",
+   "file": "pellish2008.json",
+   "key": "fig3"
+  },
+  {
+   "id": "pellish2008.fig4",
+   "stage": "A23",
+   "paper": "Pellish 2008 PhD thesis (Vanderbilt)",
+   "read_from": "Fig. 4",
+   "device": "IBM 5AM, 0.5 x 2.5 um^2 (another chip)",
+   "conditions": "forced-IB output, 300 K",
+   "role": "validation",
+   "file": "pellish2008.json",
+   "key": "fig4"
+  },
+  {
+   "id": "sutton2009.fig72",
+   "stage": "A24",
+   "paper": "Prakash et al., IEEE TNS 53(6):3175, 2006",
+   "read_from": "Sutton 2009 PhD thesis, Figure 72",
+   "device": "IBM 5AM, 0.5 x 1.0 um^2",
+   "conditions": "pre-irradiation Gummel, 300 K and 77 K",
+   "role": "validation",
+   "file": "sutton2009.json",
+   "key": "fig72"
+  },
+  {
+   "id": "sutton2004.figs21_26",
+   "stage": "A25",
+   "paper": "Sutton et al., IEEE TNS 51(6):3736, 2004",
+   "read_from": "Sutton 2009 PhD thesis, Figs. 21-26",
+   "device": "IBM 5AM to 9T",
+   "conditions": "Delta IB / IB0 vs 63 MeV proton dose, 300 K",
+   "role": "calibration",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "sutton2007.figs33_39",
+   "stage": "A25",
+   "paper": "Sutton et al., RADECS 2007",
+   "read_from": "Sutton 2009 PhD thesis, Figs. 33, 35, 39",
+   "device": "first generation",
+   "conditions": "Co-60, X-ray, proton",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "prakash2006.fig73",
+   "stage": "A25",
+   "paper": "Prakash et al., IEEE TNS 53(6):3175, 2006",
+   "read_from": "Sutton 2009 PhD thesis, Fig. 73",
+   "device": "IBM 5AM 0.5 x 1.0 um^2",
+   "conditions": "irradiated at 77 K and 300 K",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2006.fig2c_4",
+   "stage": "A27",
+   "paper": "Pellish et al., IEEE TNS 53(6):3298, 2006",
+   "read_from": "Figs. 2(c), 4",
+   "device": "IBM 5HP 0.5 x 10 um^2",
+   "conditions": "36 MeV O microbeam, Vsub -5 V",
+   "role": "calibration",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2006.fig2ab_3",
+   "stage": "A27",
+   "paper": "Pellish et al., IEEE TNS 53(6):3298, 2006",
+   "read_from": "Figs. 2(a), 2(b), 3",
+   "device": "Jazz, NSC",
+   "conditions": "substrates 0.009 to 1500 ohm cm",
+   "role": "trend",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2009.figs4_5",
+   "stage": "A27",
+   "paper": "Pellish et al., IEEE TNS 56(6):3078, 2009",
+   "read_from": "Figs. 4-5",
+   "device": "IBM 5AM 0.5 x 2.5 um^2",
+   "conditions": "microbeam maps, Cases 1 to 3",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2009.figs6_8",
+   "stage": "A27",
+   "paper": "Pellish et al., IEEE TNS 56(6):3078, 2009",
+   "read_from": "Figs. 6-8",
+   "device": "IBM 5AM 0.5 x 2.5 um^2",
+   "conditions": "broadbeam transients",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2008tns.tpa",
+   "stage": "A27",
+   "paper": "Pellish et al., IEEE TNS 55(6):2936, 2008",
+   "read_from": "Pellish 2008 PhD thesis, Figs. 32-36",
+   "device": "IBM 5AM",
+   "conditions": "two-photon laser, device off",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "lourenco2017.figs6_4_6_6",
+   "stage": "A27",
+   "paper": "Lourenco et al., IEEE TNS 64(1):406, 2017",
+   "read_from": "Lourenco 2016 PhD thesis, Figs. 6.4-6.6",
+   "device": "IBM 5AM, 8HP, 9HP",
+   "conditions": "two-photon laser, forward active",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2007.fig8",
+   "stage": "A28",
+   "paper": "Pellish et al., IEEE TNS 54(6):2322, 2007",
+   "read_from": "Pellish 2008 PhD thesis, Fig. 8",
+   "device": "IBM 5AM shift registers",
+   "conditions": "heavy-ion sigma vs LET",
+   "role": "calibration",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "pellish2007.fig9",
+   "stage": "A28",
+   "paper": "Pellish et al., IEEE TNS 54(6):2322, 2007",
+   "read_from": "Pellish 2008 PhD thesis, Fig. 9",
+   "device": "IBM 5AM shift registers",
+   "conditions": "63 MeV proton sigma",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "lourenco2017.fig6_7",
+   "stage": "A28",
+   "paper": "Lourenco et al., IEEE TNS 64(1):406, 2017",
+   "read_from": "Lourenco 2016 PhD thesis, Fig. 6.7",
+   "device": "IBM 5AM 16-bit register",
+   "conditions": "sigma vs LET, 1 Gbps",
+   "role": "validation",
+   "file": null,
+   "key": null
+  },
+  {
+   "id": "sutton2008.fig79",
+   "stage": "A29",
+   "paper": "Sutton et al., Solid-State Electronics 52(10):1652, 2008",
+   "read_from": "Sutton 2009 PhD thesis, Fig. 79",
+   "device": "IBM 8HP registers",
+   "conditions": "proton sigma, 77 K vs 300 K",
+   "role": "trend",
+   "file": null,
+   "key": null
+  }
+ ]
+}
